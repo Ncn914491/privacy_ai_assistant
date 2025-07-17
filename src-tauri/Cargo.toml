@@ -26,3 +26,8 @@ chrono = { version = "0.4", features = ["serde"] }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[package.metadata.tauri]
+bundle.identifier = "com.privacy.ai.assistant"
+bundle.icon = ["/app/src-tauri/icons/icon.png"]
+windows.webviewInstallMode = "downloadBootstrapper"

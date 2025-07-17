@@ -97,20 +97,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy })
                   )}
                   components={{
                     p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                    code: ({ inline, className, children, ...props }) => {
-                      return inline ? (
-                        <code
-                          className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-1 py-0.5 rounded text-sm font-mono"
-                          {...props}
-                        >
-                          {children}
-                        </code>
-                      ) : (
-                        <pre className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 p-3 rounded-lg overflow-x-auto">
-                          <code {...props}>{children}</code>
-                        </pre>
-                      );
-                    },
                   }}
                 >
                   {message.content}
