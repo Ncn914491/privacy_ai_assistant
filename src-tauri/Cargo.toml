@@ -1,0 +1,28 @@
+[package]
+name = "privacy-ai-assistant"
+version = "0.1.0"
+authors = ["Your Name <you@example.com>"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "privacy_ai_assistant_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Use supported versions
+[build-dependencies]
+tauri-build = { version = "2.3.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.6.2", features = [] }
+tauri-plugin-shell = "2.3.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
