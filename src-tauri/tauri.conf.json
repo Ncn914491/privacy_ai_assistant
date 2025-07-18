@@ -27,10 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": [
-      "/app/src-tauri/icons/icon.png"
-    ]
+    "targets": "all"
   },
   "plugins": {}
 }
