@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import MessageBubble from './MessageBubble';
 import InputArea from './InputArea';
 import { useChatStore } from '../stores/chatStore';
-import { cn } from '../utils/cn';
 
 const ChatInterface: React.FC = () => {
   const { messages, addMessage } = useChatStore();

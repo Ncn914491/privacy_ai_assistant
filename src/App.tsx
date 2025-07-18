@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
+import { SystemInfo, AppVersion } from './types';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -61,11 +62,11 @@ const App: React.FC = () => {
     const initializeApp = async () => {
       try {
         // Get system info
-        const systemInfo = await invoke('get_system_info');
+        const systemInfo = await invoke<SystemInfo>('get_system_info');
         setSystemInfo(systemInfo);
 
         // Get app version
-        const appVersion = await invoke('get_app_version');
+        const appVersion = await invoke<AppVersion>('get_app_version');
         setAppVersion(appVersion);
 
         setInitialized(true);

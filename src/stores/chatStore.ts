@@ -45,7 +45,7 @@ interface ChatStore extends ChatState, ChatActions {}
 
 export const useChatStore = create<ChatStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       messages: mockMessages,
       isLoading: false,
       error: null,
@@ -113,7 +113,7 @@ interface AppStore extends AppState, PreferenceActions {
 
 export const useAppStore = create<AppStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       isInitialized: false,
       systemInfo: null,
       appVersion: null,
