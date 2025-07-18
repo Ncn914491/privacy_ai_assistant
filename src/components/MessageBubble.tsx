@@ -23,12 +23,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy })
     }
   };
 
-  const formatTimestamp = (timestamp: Date) => {
+  const formatTimestamp = (timestamp: Date | string | number | undefined): string => {
+    if (!timestamp) return 'Unknown';
+    
+    const time = new Date(timestamp);
+    
+    // Validate the timestamp
+    if (isNaN(time.getTime())) {
+      return 'Invalid time';
+    }
+    
     return new Intl.DateTimeFormat('en-US', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-    }).format(timestamp);
+    }).format(time);
   };
 
   const isUser = message.role === 'user';

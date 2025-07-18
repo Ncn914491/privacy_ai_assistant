@@ -61,6 +61,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        // Check if Tauri invoke is available
+        if (typeof invoke !== 'function') {
+          console.error('Tauri invoke is not available');
+          return;
+        }
+
         // Get system info
         const systemInfo = await invoke<SystemInfo>('get_system_info');
         setSystemInfo(systemInfo);
