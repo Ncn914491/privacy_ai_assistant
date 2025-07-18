@@ -6,6 +6,7 @@ import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
+import { modelHealthChecker } from './utils/modelHealth';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -79,6 +80,10 @@ const App: React.FC = () => {
         
         // Log initialization
         await invoke('log_message', { message: 'App initialized successfully' });
+        
+        // Initialize model health checking
+        console.log('Initializing model health checker...');
+        await modelHealthChecker.checkHealth();
       } catch (error) {
         console.error('Failed to initialize app:', error);
       }

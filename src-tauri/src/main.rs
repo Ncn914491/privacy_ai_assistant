@@ -6,8 +6,10 @@ use log::info;
 
 mod commands;
 mod lib;
+mod llm;
 
 use commands::*;
+use llm::*;
 
 fn main() {
     env_logger::init();
@@ -18,7 +20,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_app_version,
             get_system_info,
-            log_message
+            log_message,
+            invoke_llm_prompt,
+            generate_llm_response,
+            check_llm_health
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

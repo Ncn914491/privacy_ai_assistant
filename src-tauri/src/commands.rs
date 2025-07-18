@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
-use log::info;
+use std::process::Command;
+use log::{info, warn, error};
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -9,6 +10,34 @@ pub struct SystemInfo {
     pub arch: String,
     pub version: String,
     pub timestamp: DateTime<Utc>,
+}
+
+#[tauri::command]
+pub fn invoke_llm_prompt(prompt: String) -> Result<String, String> {
+    info!("Invoking LLM with prompt: {}", prompt);
+
+    let output = Command::new("ollama")
+        .arg("run")
+        .arg("gemma:3n")
+        .arg(&prompt)
+        .output();
+
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                let response = String::from_utf8_lossy(&output.stdout).to_string();
+                Ok(response)
+            } else {
+                let error_msg = String::from_utf8_lossy(&output.stderr).to_string();
+                error!("LLM process error: {}", error_msg);
+                Err("Error running LLM command".into())
+            }
+        }
+        Err(e) => {
+            error!("Failed to spawn LLM process: {:?}", e);
+            Err("Failed to invoke LLM process".into())
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
