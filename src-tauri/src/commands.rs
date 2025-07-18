@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::process::Command;
-use log::{info, warn, error};
+use log::{info, error};
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -74,4 +74,37 @@ pub fn get_system_info() -> Result<SystemInfo, String> {
 pub fn log_message(message: String) -> Result<(), String> {
     info!("Frontend log: {}", message);
     Ok(())
+}
+
+#[tauri::command]
+pub fn test_tauri_connection() -> Result<String, String> {
+    info!("✅ Tauri connection test successful");
+    Ok("✅ Tauri Connected".to_string())
+}
+
+#[tauri::command]
+pub fn get_diagnostic_info() -> Result<serde_json::Value, String> {
+    info!("Running diagnostic check");
+    
+    let diagnostic = serde_json::json!({
+        "tauri_connected": true,
+        "timestamp": chrono::Utc::now(),
+        "system_info": {
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+        },
+        "commands_available": [
+            "get_app_version",
+            "get_system_info", 
+            "log_message",
+            "invoke_llm_prompt",
+            "generate_llm_response",
+            "check_llm_health",
+            "run_vosk_stt",
+            "run_piper_tts",
+            "test_audio_devices"
+        ]
+    });
+    
+    Ok(diagnostic)
 }

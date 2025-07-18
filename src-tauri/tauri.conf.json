@@ -5,7 +5,7 @@
   "identifier": "com.privacy.ai.assistant",
   "build": {
     "beforeBuildCommand": "npm run build",
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:web",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
@@ -26,7 +26,7 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": "all"
   },
   "plugins": {}

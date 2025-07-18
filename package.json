@@ -4,7 +4,8 @@
   "description": "Privacy-first, offline AI assistant desktop application",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "tauri dev",
+    "dev:web": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

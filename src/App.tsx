@@ -1,12 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import ChatInterface from './components/ChatInterface';
-import Sidebar from './components/Sidebar';
+import BrowserModeBlocker from './components/BrowserModeBlocker';
 import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
 import { modelHealthChecker } from './utils/modelHealth';
+import { TAURI_ENV, getTauriStatus } from './utils/tauriDetection';
+
+// Extend window interface for Tauri
+declare global {
+  interface Window {
+    __TAURI__?: any;
+  }
+}
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -58,13 +66,27 @@ class ErrorBoundary extends React.Component<
 
 const App: React.FC = () => {
   const { preferences, setSystemInfo, setAppVersion, setInitialized } = useAppStore();
+  const [ignoreBrowserWarning, setIgnoreBrowserWarning] = useState(false);
+  const [tauriStatus, setTauriStatus] = useState(getTauriStatus());
 
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        // Log Tauri environment status
+        console.log('🔍 Tauri Environment:', TAURI_ENV);
+        
+        // Update Tauri status
+        setTauriStatus(getTauriStatus());
+        
+        // Check if running in Tauri environment
+        if (!TAURI_ENV.isTauri) {
+          console.log('⚠️  Running in browser mode - Tauri features disabled');
+          return;
+        }
+        
         // Check if Tauri invoke is available
-        if (typeof invoke !== 'function') {
-          console.error('Tauri invoke is not available');
+        if (!TAURI_ENV.capabilities.invoke) {
+          console.error('❌ Tauri invoke is not available');
           return;
         }
 
@@ -136,13 +158,23 @@ const App: React.FC = () => {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Show browser mode blocker if not in Tauri environment
+  if (tauriStatus.status !== 'connected' && !ignoreBrowserWarning) {
+    return (
+      <ErrorBoundary>
+        <BrowserModeBlocker 
+          onIgnoreWarning={() => setIgnoreBrowserWarning(true)}
+        />
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <div className={cn(
         'h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100',
         'transition-colors duration-300'
       )}>
-        <Sidebar />
         <main className="h-full">
           <ChatInterface />
         </main>

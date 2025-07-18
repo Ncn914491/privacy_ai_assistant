@@ -11,7 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 # Use supported versions
 [build-dependencies]
-tauri-build = { version = "2.3.0", features = [] }
+tauri-build = { version = "2.3.0", features = [], default-features = false }
 
 [dependencies]
 tauri = { version = "2.6.2", features = [] }
@@ -22,6 +22,14 @@ tokio = { version = "1", features = ["full"] }
 log = "0.4"
 env_logger = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json"] }
+thiserror = "1.0"
+# STT/TTS dependencies
+cpal = "0.15"
+hound = "3.5"
+rodio = "0.17"
+byteorder = "1.5"
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]
@@ -29,5 +37,4 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [package.metadata.tauri]
 bundle.identifier = "com.privacy.ai.assistant"
-bundle.icon = ["icons/icon.ico"]
 windows.webviewInstallMode = "downloadBootstrapper"

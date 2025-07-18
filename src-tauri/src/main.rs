@@ -5,11 +5,13 @@ use env_logger;
 use log::info;
 
 mod commands;
-mod lib;
+// mod lib;
 mod llm;
+mod stt_tts;
 
 use commands::*;
 use llm::*;
+use stt_tts::*;
 
 fn main() {
     env_logger::init();
@@ -23,7 +25,14 @@ fn main() {
             log_message,
             invoke_llm_prompt,
             generate_llm_response,
-            check_llm_health
+            check_llm_health,
+            run_vosk_stt,
+            run_piper_tts,
+            get_tts_config,
+            set_tts_config,
+            test_audio_devices,
+            test_tauri_connection,
+            get_diagnostic_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
