@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 // Custom error type for better error handling
 #[derive(Debug, thiserror::Error)]
-enum CommandError {
+pub enum CommandError {
     #[error("HTTP request failed: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("Command execution failed: {0}")]
@@ -42,7 +42,7 @@ pub fn invoke_llm_prompt(prompt: String) -> Result<String, String> {
 
     let output = Command::new("ollama")
         .arg("run")
-        .arg("gemma:3n")
+        .arg("gemma3n")
         .arg(&prompt)
         .output();
 
@@ -77,7 +77,7 @@ pub fn get_app_version() -> Result<AppVersion, String> {
     
     Ok(AppVersion {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        name: env!("CARGO_PKG_NAME").to_.string(),
+        name: env!("CARGO_PKG_NAME").to_string(),
         build_date: Utc::now(),
     })
 }
@@ -159,7 +159,7 @@ pub async fn test_gemma_model() -> Result<bool, CommandError> {
     info!("Testing Gemma 3n model...");
     let client = reqwest::Client::new();
     let payload = serde_json::json!({
-        "model": "gemma:3n",
+        "model": "gemma3n",
         "prompt": "Respond with 'ok'",
         "stream": false
     });

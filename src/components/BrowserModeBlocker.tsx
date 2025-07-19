@@ -43,7 +43,7 @@ export const BrowserModeBlocker: React.FC<BrowserModeBlockerProps> = ({
               🛠️ How to Fix:
             </h3>
             <div className="space-y-3">
-              {tauriStatus.recommendations.map((rec, index) => (
+              {(tauriStatus.recommendations || []).map((rec, index) => (
                 <div key={index} className="flex items-start space-x-3">
                   <span className="flex-shrink-0 w-6 h-6 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
                     {index + 1}

@@ -184,7 +184,7 @@ export class ModelHealthChecker {
       const isHealthy = await this.checkHealth();
       return {
         installed: isHealthy,
-        availableModels: isHealthy ? ['gemma3n:latest'] : []
+        availableModels: isHealthy ? ['gemma3n'] : []
       };
     } catch (error) {
       console.error('Failed to check model installation:', error);

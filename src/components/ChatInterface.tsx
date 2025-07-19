@@ -92,7 +92,9 @@ const ChatInterface: React.FC = () => {
     try {
       // Check if running in Tauri environment
       if (!TAURI_ENV.isTauri) {
-        throw new Error('Tauri environment not available. Please run the app in desktop mode.');
+        console.warn('⚠️ Running in browser mode - some features may be limited');
+        // Don't throw error - allow limited functionality
+        // throw new Error('Tauri environment not available. Please run the app in desktop mode.');
       }
       
       // First check if model is available
@@ -103,8 +105,19 @@ const ChatInterface: React.FC = () => {
       }
       
       console.log('Sending request to generate_llm_response...');
-      const response = await invoke<string>('generate_llm_response', { prompt: content });
-      
+
+      let response: string;
+      try {
+        response = await invoke<string>('generate_llm_response', { prompt: content });
+      } catch (invokeError) {
+        if (!TAURI_ENV.isTauri) {
+          // In browser mode, provide a mock response
+          response = "I'm running in browser mode with limited functionality. The Gemma 3n model is not available in this environment. Please run the desktop application for full AI capabilities.";
+        } else {
+          throw invokeError;
+        }
+      }
+
       if (!response || response.trim().length === 0) {
         throw new Error('Empty or malformed response from the model.');
       }

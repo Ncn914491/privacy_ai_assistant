@@ -89,7 +89,7 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
           }
           throw new Error('Model did not respond correctly.');
         } catch (error) {
-          updateStepStatus('gemma', 'error', { error: 'Gemma 3n model not found.', details: 'Run `ollama pull gemma:3n` and retry.' });
+          updateStepStatus('gemma', 'error', { error: 'Gemma 3n model not found.', details: 'Run `ollama pull gemma3n` and retry.' });
           return false;
         }
       },

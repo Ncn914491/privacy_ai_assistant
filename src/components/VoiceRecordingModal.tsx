@@ -142,7 +142,8 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
 
       // Check if running in Tauri environment
       if (!TAURI_ENV.isTauri) {
-        throw new Error('Tauri environment not available. Please run the app in desktop mode.');
+        console.warn('⚠️ Voice recording not available in browser mode');
+        throw new Error('Voice recording is not available in browser mode. Please run the desktop application for voice features.');
       }
 
       // Call the STT backend

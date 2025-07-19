@@ -1,5 +1,14 @@
 import { core } from '@tauri-apps/api';
 
+// Extend Window interface to include Tauri properties
+declare global {
+  interface Window {
+    __TAURI__?: any;
+    __TAURI_INTERNALS__?: any;
+    __TAURI_INVOKE__?: any;
+  }
+}
+
 /**
  * Represents the detected capabilities of the application environment.
  */
@@ -93,4 +102,107 @@ try {
   React = require('react');
 } catch (e) {
   // React is not available, hook will not be used
+}
+
+/**
+ * Synchronous environment detection for immediate use.
+ * This provides a best-effort detection without waiting for async initialization.
+ * For more reliable detection, use ensureEnvironment() or useEnvironment().
+ */
+export const TAURI_ENV: EnvironmentCapabilities = (() => {
+  // Check if running in a non-browser context
+  if (typeof window === 'undefined') {
+    return { isTauri: false, isBrowser: false, hasInvoke: false };
+  }
+
+  // Basic synchronous checks
+  const hasTauriGlobal = !!window.__TAURI__;
+  const isTauriProtocol = window.location.protocol === 'tauri:';
+  const hasTauriUserAgent = navigator.userAgent.includes('Tauri') || navigator.userAgent.includes('wry');
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDevPort = window.location.port === '5173'; // Vite dev server port
+
+  // Check for Tauri-specific window properties that indicate we're in the desktop app
+  const hasTauriWindow = !!(window as any).__TAURI_INTERNALS__;
+  const hasTauriAPI = !!(window as any).__TAURI_INVOKE__;
+
+  // Enhanced detection for development environment
+  // In Tauri dev mode, we're running on localhost:5173 but with Tauri APIs available
+  const isDevelopmentTauri = isLocalhost && isDevPort && (hasTauriGlobal || hasTauriUserAgent || hasTauriWindow || hasTauriAPI);
+
+  // More aggressive detection - if we're on localhost:5173, assume Tauri dev mode
+  // This is because the user is explicitly running tauri:dev
+  const isLikelyTauriDev = isLocalhost && isDevPort;
+
+  // Determine if we're likely in Tauri
+  const isTauri = hasTauriGlobal || isTauriProtocol || isDevelopmentTauri || isLikelyTauriDev;
+
+  console.log('🔍 Tauri Detection:', {
+    hasTauriGlobal,
+    isTauriProtocol,
+    hasTauriUserAgent,
+    hasTauriWindow,
+    hasTauriAPI,
+    isLocalhost,
+    isDevPort,
+    isDevelopmentTauri,
+    isLikelyTauriDev,
+    finalIsTauri: isTauri,
+    userAgent: navigator.userAgent,
+    location: window.location.href,
+  });
+
+  return {
+    isTauri,
+    isBrowser: !isTauri,
+    hasInvoke: hasTauriGlobal && typeof core.invoke === 'function',
+  };
+})();
+
+/**
+ * Interface for Tauri connection status
+ */
+export interface TauriStatus {
+  status: 'connected' | 'disconnected' | 'checking';
+  message?: string;
+  capabilities?: EnvironmentCapabilities;
+  recommendations?: string[];
+}
+
+/**
+ * Get the current Tauri connection status synchronously
+ */
+export function getTauriStatus(): TauriStatus {
+  const capabilities = TAURI_ENV;
+
+  if (capabilities.isTauri && capabilities.hasInvoke) {
+    return {
+      status: 'connected',
+      message: 'Tauri environment is ready',
+      capabilities,
+      recommendations: [],
+    };
+  } else if (capabilities.isTauri && !capabilities.hasInvoke) {
+    return {
+      status: 'checking',
+      message: 'Tauri detected but invoke API not ready',
+      capabilities,
+      recommendations: [
+        'Wait a moment for Tauri to fully initialize',
+        'Refresh the application if the issue persists',
+      ],
+    };
+  } else {
+    return {
+      status: 'disconnected',
+      message: 'Running in browser mode',
+      capabilities,
+      recommendations: [
+        'Close this browser tab',
+        'Run the desktop application using: npm run tauri:dev',
+        'Make sure the Tauri development server is running',
+        'Check that no firewall is blocking the application',
+      ],
+    };
+  }
 }

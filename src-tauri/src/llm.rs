@@ -4,7 +4,7 @@ use std::time::Duration;
 
 // Configuration constants
 const OLLAMA_BASE_URL: &str = "http://localhost:11434";
-const DEFAULT_MODEL: &str = "gemma3n:latest"; // Gemma 3n model as requested by user
+const DEFAULT_MODEL: &str = "gemma3n"; // Gemma 3n model as requested by user
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120); // 2 minutes for LLM responses
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -176,16 +176,45 @@ impl LLMClient {
     }
 
     pub async fn check_health(&self) -> Result<bool, LLMError> {
-        let url = format!("{}/api/tags", self.config.base_url);
-        
-        match self.client.get(&url).send().await {
-            Ok(response) => Ok(response.status().is_success()),
+        info!("Checking LLM health - verifying Ollama service and model availability");
+
+        // First check if Ollama service is running
+        let tags_url = format!("{}/api/tags", self.config.base_url);
+
+        let tags_response = match self.client.get(&tags_url).send().await {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    info!("Ollama service not responding properly");
+                    return Ok(false);
+                }
+                response
+            }
             Err(e) => {
                 if e.is_connect() {
-                    Ok(false)
+                    info!("Cannot connect to Ollama service");
+                    return Ok(false);
                 } else {
-                    Err(LLMError::Network(e))
+                    return Err(LLMError::Network(e));
                 }
+            }
+        };
+
+        // Check if our specific model is available
+        match tags_response.text().await {
+            Ok(tags_text) => {
+                info!("Available models response: {}", tags_text);
+                // Check if the response contains our model
+                let has_model = tags_text.contains(&self.config.model) || tags_text.contains("gemma3n");
+                if has_model {
+                    info!("✅ Gemma 3n model found in available models");
+                } else {
+                    info!("⚠️ Gemma 3n model not found in available models");
+                }
+                Ok(has_model)
+            }
+            Err(e) => {
+                error!("Failed to read tags response: {}", e);
+                Err(LLMError::Network(e))
             }
         }
     }

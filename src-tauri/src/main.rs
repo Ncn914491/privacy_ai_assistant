@@ -3,6 +3,7 @@
 
 use env_logger;
 use log::info;
+use tauri::Manager;
 
 mod commands;
 mod llm;
@@ -23,6 +24,13 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            let window = app.get_webview_window("main").unwrap();
+            window.show().unwrap();
+            window.set_focus().unwrap();
+            info!("Tauri window opened and focused");
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // General commands
             ping,

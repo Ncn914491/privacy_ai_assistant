@@ -7,7 +7,7 @@ import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
-import { ensureEnvironment, EnvironmentCapabilities } from './utils/tauriDetection';
+import { ensureEnvironment, EnvironmentCapabilities, TAURI_ENV } from './utils/tauriDetection';
 
 // Define application states
 type AppState = 'initializing' | 'diagnostics' | 'ready' | 'browser_mode' | 'error';
@@ -21,7 +21,27 @@ const App: React.FC = () => {
     const initializeApp = async () => {
       try {
         console.log('🚀 Initializing application...');
-        const env = await ensureEnvironment();
+
+        // First try synchronous detection
+        console.log('🔍 Checking synchronous Tauri detection...');
+        let env = TAURI_ENV;
+
+        // If synchronous detection suggests we're in Tauri, try async confirmation
+        if (env.isTauri) {
+          console.log('✅ Synchronous detection found Tauri environment, confirming...');
+          try {
+            // Try async detection with shorter timeout
+            const asyncEnv = await Promise.race([
+              ensureEnvironment(),
+              new Promise<EnvironmentCapabilities>((resolve) =>
+                setTimeout(() => resolve(env), 1000) // 1 second timeout
+              )
+            ]);
+            env = asyncEnv;
+          } catch (error) {
+            console.warn('⚠️ Async detection failed, using synchronous result:', error);
+          }
+        }
 
         if (env.isBrowser) {
           console.warn('🌐 Running in browser mode.');
@@ -30,10 +50,8 @@ const App: React.FC = () => {
         }
 
         if (!env.hasInvoke) {
-          console.error('❌ Tauri environment detected, but invoke is missing!');
-          setError('Tauri API is not available. The app may be broken.');
-          setAppState('error');
-          return;
+          console.warn('⚠️ Tauri environment detected, but invoke is not ready yet. Proceeding with diagnostics...');
+          // Don't error out immediately, let diagnostics handle it
         }
 
         console.log('✅ Tauri environment confirmed. Running diagnostics...');
