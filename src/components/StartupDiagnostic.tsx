@@ -18,13 +18,6 @@ interface StartupDiagnosticProps {
   className?: string;
 }
 
-// Extend window interface for Tauri
-declare global {
-  interface Window {
-    __TAURI__?: any;
-  }
-}
-
 export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
   onDiagnosticComplete,
   className = ''
@@ -250,11 +243,11 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
     logDiagnostic('Starting comprehensive system diagnostic...', 'info');
     
     // Run tests in sequence
-    const tauriOk = await testTauriEnvironment();
-    const backendOk = await testBackendCommands();
-    const ollamaOk = await testOllamaService();
-    const gemmaOk = await testGemmaModel();
-    const audioOk = await testAudioSystem();
+    await testTauriEnvironment();
+    await testBackendCommands();
+    await testOllamaService();
+    await testGemmaModel();
+    await testAudioSystem();
     
     // Determine overall success - allow partial functionality
     const criticalSteps = steps.filter(s => s.critical);

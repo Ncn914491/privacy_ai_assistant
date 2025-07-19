@@ -7,14 +7,8 @@ import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
 import { modelHealthChecker } from './utils/modelHealth';
-import { TAURI_ENV, getTauriStatus } from './utils/tauriDetection';
-
-// Extend window interface for Tauri
-declare global {
-  interface Window {
-    __TAURI__?: any;
-  }
-}
+import { getTauriStatus, waitForTauriEnvironment } from './utils/tauriDetection';
+import { debugTauriEnvironment, waitForWindowProperty } from './utils/tauriDebug';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -50,6 +44,7 @@ class ErrorBoundary extends React.Component<
               The application encountered an error. Please refresh the page.
             </p>
             <button
+              type="button"
               onClick={() => window.location.reload()}
               className="btn-primary"
             >
@@ -72,20 +67,33 @@ const App: React.FC = () => {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // Log Tauri environment status
-        console.log('🔍 Tauri Environment:', TAURI_ENV);
-        
+        // Debug Tauri environment
+        debugTauriEnvironment();
+
+        // Try to wait for Tauri API to be available
+        try {
+          console.log('🔍 Waiting for window.__TAURI__ to be available...');
+          await waitForWindowProperty('__TAURI__', 3000);
+          console.log('✅ window.__TAURI__ is now available');
+        } catch (error) {
+          console.warn('⚠️ window.__TAURI__ not available:', error);
+        }
+
+        // Wait for Tauri environment to be ready
+        console.log('🔍 Waiting for Tauri environment...');
+        const tauriEnv = await waitForTauriEnvironment(5000);
+
         // Update Tauri status
         setTauriStatus(getTauriStatus());
-        
+
         // Check if running in Tauri environment
-        if (!TAURI_ENV.isTauri) {
+        if (!tauriEnv.isTauri) {
           console.log('⚠️  Running in browser mode - Tauri features disabled');
           return;
         }
-        
+
         // Check if Tauri invoke is available
-        if (!TAURI_ENV.capabilities.invoke) {
+        if (!tauriEnv.capabilities.invoke) {
           console.error('❌ Tauri invoke is not available');
           return;
         }

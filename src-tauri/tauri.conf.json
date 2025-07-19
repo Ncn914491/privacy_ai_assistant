@@ -29,5 +29,15 @@
     "active": false,
     "targets": "all"
   },
-  "plugins": {}
+  "plugins": {
+    "shell": {
+      "open": true
+    },
+    "fs": {
+      "scope": ["**"]
+    },
+    "http": {
+      "scope": ["http://localhost:11434/**", "https://localhost:11434/**"]
+    }
+  }
 }

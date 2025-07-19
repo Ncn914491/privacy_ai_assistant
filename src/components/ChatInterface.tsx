@@ -25,7 +25,7 @@ const ChatInterface: React.FC = () => {
   });
   const [systemReady, setSystemReady] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(true);
-  const [diagnosticResults, setDiagnosticResults] = useState<any[]>([]);
+  const [, setDiagnosticResults] = useState<any[]>([]);
 
   useEffect(() => {
     const scrollToBottom = () => {

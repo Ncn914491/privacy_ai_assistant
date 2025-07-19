@@ -86,15 +86,17 @@ export const BrowserModeBlocker: React.FC<BrowserModeBlockerProps> = ({
           
           <div className="flex gap-3 justify-center">
             <button
+              type="button"
               onClick={() => window.location.reload()}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
             >
               <ExternalLink className="w-4 h-4" />
               <span>Refresh Page</span>
             </button>
-            
+
             {onIgnoreWarning && (
               <button
+                type="button"
                 onClick={onIgnoreWarning}
                 className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
               >
