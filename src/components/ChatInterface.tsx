@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 import InputArea from './InputArea';
 import ModelStatusBadge from './ModelStatusBadge';
@@ -9,10 +9,52 @@ import { invoke } from '@tauri-apps/api/core';
 import { modelHealthChecker, ModelHealthStatus } from '../utils/modelHealth';
 import { AlertTriangle, Settings } from 'lucide-react';
 import { TAURI_ENV } from '../utils/tauriDetection';
+import { SttResult } from '../types';
+import { useStreamingLLM } from '../hooks/useStreamingLLM';
+import VoiceRecordingModal from './VoiceRecordingModal';
+
 
 const ChatInterface: React.FC = () => {
   const [ttsEnabled, setTtsEnabled] = useState(false);
-  const { messages, addMessage, setLoading, isLoading } = useChatStore();
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const { messages, addMessage, updateMessage, setLoading, isLoading } = useChatStore();
+  const { streamingState, startStream, stopStream, resetStream } = useStreamingLLM();
+  const currentStreamingMessageId = useRef<string | null>(null);
+
+  // Monitor streaming state and update messages in real-time
+  useEffect(() => {
+    if (currentStreamingMessageId.current && streamingState.streamedContent) {
+      console.log('🔄 Updating streaming message with content:', streamingState.streamedContent.length, 'chars');
+      updateMessage(currentStreamingMessageId.current, {
+        content: streamingState.streamedContent
+      });
+    }
+
+    // Handle streaming completion
+    if (currentStreamingMessageId.current && !streamingState.isStreaming && streamingState.streamedContent) {
+      console.log('✅ Streaming completed, final content length:', streamingState.streamedContent.length);
+
+      // TTS for completed responses (skip for very long responses)
+      if (ttsEnabled && streamingState.streamedContent.length < 1000) {
+        invoke('run_piper_tts', { text: streamingState.streamedContent }).catch((error) => {
+          console.error('TTS Error:', error);
+        });
+      }
+
+      // Clear the streaming message ID
+      currentStreamingMessageId.current = null;
+    }
+
+    // Handle streaming errors
+    if (currentStreamingMessageId.current && streamingState.error) {
+      console.error('❌ Streaming error, updating message:', streamingState.error);
+      updateMessage(currentStreamingMessageId.current, {
+        content: getErrorMessage(streamingState.error)
+      });
+      currentStreamingMessageId.current = null;
+    }
+  }, [streamingState, updateMessage, ttsEnabled]);
+
   const [modelHealth, setModelHealth] = useState<ModelHealthStatus>({
     isAvailable: false,
     isChecking: false,
@@ -50,11 +92,11 @@ const ChatInterface: React.FC = () => {
     return unsubscribe;
   }, []);
 
-  const handleDiagnosticComplete = (success: boolean, results: any[]) => {
-    console.log('Diagnostic complete:', { success, results });
+  const handleDiagnosticComplete = (success: boolean) => {
+    console.log('Diagnostic complete:', { success });
     setSystemReady(success);
-    setDiagnosticResults(results);
-    
+    setDiagnosticResults([]); // Set empty array since we don't get results anymore
+
     // Auto-hide diagnostic after 3 seconds if successful
     if (success) {
       setTimeout(() => {
@@ -85,57 +127,158 @@ const ChatInterface: React.FC = () => {
     return `Error: ${error}`;
   };
 
+  // 🧪 Test function for streaming
+  const handleTestStreaming = async () => {
+    try {
+      console.log('🧪 Testing streaming functionality...');
+      const streamId = await invoke<string>('test_streaming');
+      console.log('✅ Test streaming completed with ID:', streamId);
+      addMessage('🧪 Streaming test completed successfully!', 'assistant');
+    } catch (error) {
+      console.error('❌ Streaming test failed:', error);
+      addMessage(`❌ Streaming test failed: ${error}`, 'assistant');
+    }
+  };
+
+  // 🧪 Test function for static file STT
+  const handleTestStaticSTT = async () => {
+    try {
+      console.log('🧪 Testing static file STT...');
+      setLoading(true);
+
+      // Add a test message to show we're testing
+      addMessage('🧪 Testing STT with synthesize.wav file', 'user');
+
+      // Call the test command
+      const result = await invoke<SttResult>('test_static_file_stt', {
+        filePath: null // Use default path
+      });
+
+      console.log('🧪 Static STT test result:', result);
+
+      if (result.success && result.text && result.text.trim().length > 0) {
+        // Add the transcribed text as a user message
+        addMessage(`📝 Transcribed: "${result.text.trim()}"`, 'assistant');
+
+        // Now test the full pipeline by sending this as an LLM query
+        console.log('🤖 Testing full pipeline with transcribed text...');
+        const llmResponse = await invoke<string>('generate_llm_response', {
+          prompt: result.text.trim()
+        });
+
+        addMessage(llmResponse.trim(), 'assistant');
+        console.log('✅ Full STT → LLM pipeline test successful!');
+      } else {
+        // Show the error details
+        addMessage(`❌ STT Test Failed: ${result.text}`, 'assistant');
+        console.error('❌ Static STT test failed:', result);
+      }
+
+    } catch (error) {
+      console.error('❌ Static STT test error:', error);
+      addMessage(`❌ STT Test Error: ${error}`, 'assistant');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSendMessage = async (content: string) => {
     addMessage(content, 'user');
     setLoading(true);
-    
+
+    // Reset any previous stream
+    resetStream();
+
+    // Add a streaming message placeholder
+    const streamingMessageId = Date.now();
+    addMessage('🤔 Thinking...', 'assistant', streamingMessageId);
+
     try {
       // Check if running in Tauri environment
       if (!TAURI_ENV.isTauri) {
         console.warn('⚠️ Running in browser mode - some features may be limited');
-        // Don't throw error - allow limited functionality
-        // throw new Error('Tauri environment not available. Please run the app in desktop mode.');
+        // In browser mode, provide a mock response
+        const mockResponse = "I'm running in browser mode with limited functionality. The Gemma 3n model is not available in this environment. Please run the desktop application for full AI capabilities.";
+        updateMessage(streamingMessageId.toString(), { content: mockResponse });
+        setLoading(false);
+        return;
       }
-      
+
       // First check if model is available
       const isHealthy = await modelHealthChecker.checkHealth();
-      
+
       if (!isHealthy) {
         throw new Error('Gemma 3n model is not running. Please start it via Ollama.');
       }
-      
-      console.log('Sending request to generate_llm_response...');
 
-      let response: string;
+      console.log('🚀 Starting streaming response for:', content);
+
+      // Store the streaming message ID for real-time updates
+      currentStreamingMessageId.current = streamingMessageId.toString();
+
+      // Try streaming first
       try {
-        response = await invoke<string>('generate_llm_response', { prompt: content });
-      } catch (invokeError) {
-        if (!TAURI_ENV.isTauri) {
-          // In browser mode, provide a mock response
-          response = "I'm running in browser mode with limited functionality. The Gemma 3n model is not available in this environment. Please run the desktop application for full AI capabilities.";
-        } else {
-          throw invokeError;
+        await startStream(content);
+
+        // Update the message to show streaming started
+        updateMessage(streamingMessageId.toString(), { content: '🔄 Generating response...' });
+
+        console.log('✅ Streaming started successfully, message ID:', streamingMessageId);
+
+        // The useEffect will handle real-time updates
+        setLoading(false);
+
+      } catch (streamError) {
+        console.warn('⚠️ Streaming failed, falling back to regular response:', streamError);
+
+        // Clear the streaming message ID since streaming failed
+        currentStreamingMessageId.current = null;
+
+        // Fallback to non-streaming response
+        const response = await invoke<string>('generate_llm_response', { prompt: content });
+
+        if (!response || response.trim().length === 0) {
+          throw new Error('Empty or malformed response from the model.');
+        }
+
+        updateMessage(streamingMessageId.toString(), { content: response.trim() });
+
+        // TTS for responses (skip for very long responses)
+        if (ttsEnabled && response.length < 1000) {
+          invoke('run_piper_tts', { text: response.trim() }).catch((error) => {
+            console.error('TTS Error:', error);
+          });
         }
       }
 
-      if (!response || response.trim().length === 0) {
-        throw new Error('Empty or malformed response from the model.');
-      }
-      
-      console.log('Received response from LLM:', response.substring(0, 100) + '...');
-addMessage(response.trim(), 'assistant');
-      if (ttsEnabled) {
-        invoke('run_piper_tts', { text: response.trim() }).catch((error) => {
-          console.error('TTS Error:', error);
-        });
-      }
     } catch (error) {
-      console.error('Error invoking LLM:', error);
+      console.error('❌ Error in handleSendMessage:', error);
+
+      // Clear the streaming message ID on error
+      currentStreamingMessageId.current = null;
+
       const errorMessage = getErrorMessage(error instanceof Error ? error.message : String(error));
-      addMessage(errorMessage, 'assistant');
+      updateMessage(streamingMessageId.toString(), { content: errorMessage });
     } finally {
       setLoading(false);
     }
+  };
+
+  // Voice input handlers
+  const handleVoiceInput = () => {
+    setShowVoiceModal(true);
+  };
+
+  const handleVoiceTranscription = (transcription: string) => {
+    console.log('🎤 Voice transcription received:', transcription);
+    setShowVoiceModal(false);
+
+    // Send the transcribed text as a message
+    handleSendMessage(transcription);
+  };
+
+  const handleVoiceRecordingStateChange = (isRecording: boolean) => {
+    console.log('🎤 Voice recording state changed:', isRecording);
   };
 
   return (
@@ -155,8 +298,58 @@ addMessage(response.trim(), 'assistant');
         
         {/* Controls */}
         <div className="flex items-center space-x-4">
+          {/* Voice Input Button */}
+          {TAURI_ENV.isTauri && systemReady && (
+            <button
+              type="button"
+              onClick={handleVoiceInput}
+              disabled={isLoading || streamingState.isStreaming}
+              className="p-2 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Voice input"
+            >
+              🎤
+            </button>
+          )}
+
+          {/* Stop Response Button */}
+          {streamingState.isStreaming && (
+            <button
+              type="button"
+              onClick={stopStream}
+              className="px-3 py-1 text-xs bg-red-500 text-white rounded-md hover:bg-red-600"
+              title="Stop response"
+            >
+              ⏹️ Stop
+            </button>
+          )}
+
+          {/* Test Buttons */}
+          {TAURI_ENV.isTauri && (
+            <>
+              <button
+                type="button"
+                onClick={handleTestStreaming}
+                disabled={isLoading || streamingState.isStreaming}
+                className="px-3 py-1 text-xs bg-green-500 text-white rounded-md hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Test streaming functionality"
+              >
+                🧪 Test Stream
+              </button>
+              <button
+                type="button"
+                onClick={handleTestStaticSTT}
+                disabled={isLoading || streamingState.isStreaming}
+                className="px-3 py-1 text-xs bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Test STT with static file"
+              >
+                🧪 Test STT
+              </button>
+            </>
+          )}
+
           {/* Diagnostic Toggle */}
           <button
+            type="button"
             onClick={() => setShowDiagnostic(!showDiagnostic)}
             className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
             title="Toggle diagnostic panel"
@@ -241,7 +434,8 @@ addMessage(response.trim(), 'assistant');
       {/* Input area */}
       <InputArea
         onSendMessage={handleSendMessage}
-        disabled={!systemReady || !modelHealth.isAvailable}
+        disabled={!systemReady || !modelHealth.isAvailable || streamingState.isStreaming}
+        placeholder={streamingState.isStreaming ? "AI is responding..." : "Type your message..."}
       />
       
       {/* Diagnostic Panel */}
@@ -262,6 +456,16 @@ addMessage(response.trim(), 'assistant');
             </div>
           </div>
         </div>
+      )}
+
+      {/* Voice Recording Modal */}
+      {showVoiceModal && (
+        <VoiceRecordingModal
+          isOpen={showVoiceModal}
+          onClose={() => setShowVoiceModal(false)}
+          onTranscriptionComplete={handleVoiceTranscription}
+          onRecordingStateChange={handleVoiceRecordingStateChange}
+        />
       )}
     </div>
   );

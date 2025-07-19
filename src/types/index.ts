@@ -55,7 +55,7 @@ export interface KeyboardShortcut {
 }
 
 export interface ChatActions {
-  addMessage: (content: string, role: 'user' | 'assistant') => void;
+  addMessage: (content: string, role: 'user' | 'assistant', customId?: string | number) => void;
   updateMessage: (id: string, updates: Partial<Message>) => void;
   deleteMessage: (id: string) => void;
   clearMessages: () => void;
@@ -72,4 +72,10 @@ export interface PreferenceActions {
   toggleSounds: () => void;
   toggleAutoSave: () => void;
   resetPreferences: () => void;
+}
+
+export interface SttResult {
+  text: string;
+  confidence: number;
+  success: boolean;
 }

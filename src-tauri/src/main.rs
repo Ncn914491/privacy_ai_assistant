@@ -46,13 +46,21 @@ fn main() {
             check_llm_health,
             check_ollama_service, // New diagnostic command
             test_gemma_model,     // New diagnostic command
+            start_llm_stream,
+            stop_llm_stream,
+            test_streaming,
 
             // STT/TTS commands
             run_vosk_stt,
             run_piper_tts,
             get_tts_config,
             set_tts_config,
-            test_audio_devices
+            test_audio_devices,
+            test_stt_debug,
+            test_path_escaping,
+            test_static_file_stt,
+            process_audio_file,
+            process_audio_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

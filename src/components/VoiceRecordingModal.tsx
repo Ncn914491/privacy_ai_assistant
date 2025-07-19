@@ -30,6 +30,12 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const [recordingState, setRecordingState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'processing' | 'complete' | 'error'>('idle');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // MediaRecorder refs and state
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Recording timer and audio level simulation
@@ -60,73 +66,158 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
   // Auto-close modal when not open
   useEffect(() => {
     if (!isOpen) {
-      handleStop();
-      setTranscription('');
-      setPartialTranscription('');
-      setError(null);
-      setRecordingTime(0);
-    }
-  }, [isOpen]);
-
-  const handleStart = async () => {
-    try {
-      setError(null);
-      setRecordingState('starting');
-      setTranscription('');
-      setPartialTranscription('Initializing microphone...');
-
-      // Simulate initialization delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      setIsRecording(true);
-      setRecordingState('recording');
-      setPartialTranscription('🎤 Listening...');
-
-      // Notify parent component
-      onRecordingStateChange?.(true);
-
-      console.log('Starting voice recording...');
-
-      // Simulate real-time transcription updates with more realistic feedback
-      const transcriptionTimer = setInterval(() => {
-        if (isRecording) {
-          setPartialTranscription(prev => {
-            const messages = [
-              '🎤 Listening...',
-              '🎤 Detecting speech...',
-              '🎤 Processing audio...',
-              '🎤 Capturing voice...'
-            ];
-            const currentIndex = messages.indexOf(prev);
-            return messages[(currentIndex + 1) % messages.length];
-          });
-        }
-      }, 1500);
-
-      // Auto-stop after 5 seconds (matching backend)
-      recordingTimeoutRef.current = setTimeout(() => {
-        clearInterval(transcriptionTimer);
-        handleStop();
-      }, 5000);
-
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      setError('Failed to start recording. Please check microphone permissions.');
-      setRecordingState('error');
-      setIsRecording(false);
-    }
-  };
-
-  const handleStop = async () => {
-    if (!isRecording) return;
-
-    try {
-      // Clear any pending timeout
+      // Clean up without calling handleStop to avoid recursion
       if (recordingTimeoutRef.current) {
         clearTimeout(recordingTimeoutRef.current);
         recordingTimeoutRef.current = null;
       }
 
+      // Stop MediaRecorder if it's recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+
+      // Stop all tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+
+      // Reset state
+      setIsRecording(false);
+      setRecordingState('idle');
+      setTranscription('');
+      setPartialTranscription('');
+      setError(null);
+      setRecordingTime(0);
+      setAudioLevel(0);
+      setIsProcessing(false);
+
+      // Clear audio chunks
+      audioChunksRef.current = [];
+
+      // Notify parent component
+      onRecordingStateChange?.(false);
+    }
+  }, [isOpen, onRecordingStateChange]);
+
+  const handleStart = async () => {
+    // Prevent multiple simultaneous start calls
+    if (isRecording || recordingState !== 'idle') {
+      console.log('⚠️ Recording already in progress or not in idle state:', recordingState);
+      return;
+    }
+
+    try {
+      setError(null);
+      setRecordingState('starting');
+      setTranscription('');
+      setPartialTranscription('🎤 Initializing microphone...');
+
+      console.log('🎤 Starting voice recording with MediaRecorder...');
+
+      // Check if running in Tauri environment
+      if (!TAURI_ENV.isTauri) {
+        throw new Error('Voice recording is not available in browser mode. Please run the desktop application for voice features.');
+      }
+
+      // Request microphone access with specific constraints for speech recognition
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 16000,        // 16kHz for speech recognition
+          channelCount: 1,          // Mono
+          echoCancellation: true,   // Reduce echo
+          noiseSuppression: true,   // Reduce background noise
+          autoGainControl: true     // Automatic gain control
+        }
+      });
+
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      // Create MediaRecorder with the best available format for speech recognition
+      let mediaRecorder: MediaRecorder;
+      let mimeType: string;
+
+      // Try different formats in order of preference for speech recognition
+      if (MediaRecorder.isTypeSupported('audio/wav')) {
+        mimeType = 'audio/wav';
+      } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=pcm')) {
+        mimeType = 'audio/webm;codecs=pcm';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else {
+        mimeType = ''; // Let browser choose
+      }
+
+      console.log('🎤 Using audio format:', mimeType || 'browser default');
+
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      mediaRecorderRef.current = mediaRecorder;
+
+      // Handle data available event
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+          console.log('📊 Audio chunk received:', event.data.size, 'bytes');
+        }
+      };
+
+      // Handle recording stop event
+      mediaRecorder.onstop = async () => {
+        console.log('⏹️ MediaRecorder stopped, processing audio...');
+        await processRecordedAudio();
+      };
+
+      // Start recording
+      mediaRecorder.start(100); // Collect data every 100ms
+
+      setIsRecording(true);
+      setRecordingState('recording');
+      setPartialTranscription('🎤 Recording... Speak now!');
+
+      // Notify parent component
+      onRecordingStateChange?.(true);
+
+      // Auto-stop after 5 seconds
+      recordingTimeoutRef.current = setTimeout(() => {
+        handleStop();
+      }, 5000);
+
+      console.log('✅ Recording started successfully');
+
+    } catch (error) {
+      console.error('❌ Failed to start recording:', error);
+      setError(error instanceof Error ? error.message : 'Failed to start recording. Please check microphone permissions.');
+      setRecordingState('error');
+      setIsRecording(false);
+
+      // Clean up on error
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+    }
+  };
+
+  const handleStop = async () => {
+    // Prevent multiple calls and recursion
+    if (!isRecording || !mediaRecorderRef.current) {
+      console.log('⏹️ Stop called but not recording or no recorder');
+      return;
+    }
+
+    try {
+      console.log('⏹️ Stopping recording...');
+
+      // Clear any pending timeout first
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+        recordingTimeoutRef.current = null;
+      }
+
+      // Set stopping state immediately to prevent multiple calls
       setIsRecording(false);
       setRecordingState('stopping');
       setPartialTranscription('⏹️ Stopping recording...');
@@ -134,35 +225,95 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
       // Notify parent component
       onRecordingStateChange?.(false);
 
-      // Brief delay to show stopping state
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      setRecordingState('processing');
-      setPartialTranscription('🔄 Processing speech...');
-
-      // Check if running in Tauri environment
-      if (!TAURI_ENV.isTauri) {
-        console.warn('⚠️ Voice recording not available in browser mode');
-        throw new Error('Voice recording is not available in browser mode. Please run the desktop application for voice features.');
+      // Stop the MediaRecorder (this will trigger the onstop event)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
       }
 
-      // Call the STT backend
-      const result = await invoke<SttResult>('run_vosk_stt', { mic_on: true });
-
-      if (result.success && result.text) {
-        setTranscription(result.text);
-        setPartialTranscription('');
-        setRecordingState('complete');
-        console.log('Transcription completed:', result.text);
-      } else {
-        throw new Error('Transcription failed or returned empty text');
+      // Stop all tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
 
     } catch (error) {
-      console.error('STT Error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to process speech');
+      console.error('❌ Error stopping recording:', error);
+      setError(error instanceof Error ? error.message : 'Failed to stop recording');
+      setRecordingState('error');
+      setIsRecording(false); // Ensure we're not stuck in recording state
+    }
+  };
+
+  const processRecordedAudio = async () => {
+    // Prevent multiple simultaneous processing calls
+    if (isProcessing) {
+      console.log('⚠️ Audio processing already in progress, skipping...');
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      setRecordingState('processing');
+      setPartialTranscription('🔄 Processing recorded audio...');
+
+      console.log('📊 Processing', audioChunksRef.current.length, 'audio chunks');
+
+      if (audioChunksRef.current.length === 0) {
+        throw new Error('No audio data recorded. Please try again.');
+      }
+
+      // Create blob from recorded chunks with the same MIME type used for recording
+      const audioBlob = new Blob(audioChunksRef.current);
+      console.log('📦 Created audio blob:', audioBlob.size, 'bytes, type:', audioBlob.type);
+
+      if (audioBlob.size === 0) {
+        throw new Error('Audio recording is empty. Please ensure your microphone is working and try again.');
+      }
+
+      // Convert blob to base64 for Tauri (handle large files safely)
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      // Convert to base64 safely without spreading large arrays
+      let binaryString = '';
+      const chunkSize = 8192; // Process in chunks to avoid stack overflow
+
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.slice(i, i + chunkSize);
+        binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+
+      const base64Data = btoa(binaryString);
+
+      console.log('🔄 Converting audio to base64 for backend processing...');
+      setPartialTranscription('🎯 Running speech recognition...');
+
+      // Call the STT backend with the audio data directly
+      const result = await invoke<SttResult>('process_audio_data', {
+        audioData: base64Data,
+        mimeType: audioBlob.type || 'audio/webm'
+      });
+
+      console.log('🎯 STT result:', result);
+
+      if (result.success && result.text && result.text.trim().length > 0) {
+        setTranscription(result.text.trim());
+        setPartialTranscription('');
+        setRecordingState('complete');
+        console.log('✅ Transcription completed:', result.text);
+      } else {
+        throw new Error(result.text || 'Speech recognition returned empty result. Please speak more clearly and try again.');
+      }
+
+    } catch (error) {
+      console.error('❌ Audio processing error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to process recorded audio');
       setPartialTranscription('');
       setRecordingState('error');
+    } finally {
+      // Clean up audio chunks and reset processing flag
+      audioChunksRef.current = [];
+      setIsProcessing(false);
     }
   };
 

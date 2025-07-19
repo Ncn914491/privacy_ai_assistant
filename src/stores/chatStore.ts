@@ -51,14 +51,14 @@ export const useChatStore = create<ChatStore>()(
       error: null,
       currentInput: '',
 
-      addMessage: (content: string, role: 'user' | 'assistant') => {
+      addMessage: (content: string, role: 'user' | 'assistant', customId?: string | number) => {
         const newMessage: Message = {
-          id: generateId(),
+          id: customId ? customId.toString() : generateId(),
           content,
           role,
           timestamp: new Date(),
         };
-        
+
         set((state) => ({
           messages: [...state.messages, newMessage],
         }));
