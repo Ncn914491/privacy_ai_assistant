@@ -1,8 +1,32 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::process::Command;
-use log::{info, error};
+use log::{info, error, warn};
 use chrono::{DateTime, Utc};
+
+// Custom error type for better error handling
+#[derive(Debug, thiserror::Error)]
+enum CommandError {
+    #[error("HTTP request failed: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("Command execution failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("JSON serialization failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("LLM Error: {0}")]
+    Llm(String),
+}
+
+// Implement Serialize for the error type to send it over the Tauri bridge
+impl Serialize for CommandError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_ref())
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInfo {
@@ -53,7 +77,7 @@ pub fn get_app_version() -> Result<AppVersion, String> {
     
     Ok(AppVersion {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        name: env!("CARGO_PKG_NAME").to_string(),
+        name: env!("CARGO_PKG_NAME").to_.string(),
         build_date: Utc::now(),
     })
 }
@@ -107,4 +131,52 @@ pub fn get_diagnostic_info() -> Result<serde_json::Value, String> {
     });
     
     Ok(diagnostic)
+}
+
+
+#[tauri::command]
+pub async fn check_ollama_service() -> Result<bool, CommandError> {
+    info!("Checking Ollama service status...");
+    match reqwest::get("http://localhost:11434/api/version").await {
+        Ok(response) => {
+            if response.status().is_success() {
+                info!("✅ Ollama service is responsive.");
+                Ok(true)
+            } else {
+                warn!("⚠️ Ollama service returned non-success status: {}", response.status());
+                Ok(false)
+            }
+        }
+        Err(e) => {
+            error!("❌ Failed to connect to Ollama service: {}", e);
+            Err(CommandError::Reqwest(e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn test_gemma_model() -> Result<bool, CommandError> {
+    info!("Testing Gemma 3n model...");
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "model": "gemma:3n",
+        "prompt": "Respond with 'ok'",
+        "stream": false
+    });
+
+    match client.post("http://localhost:11434/api/generate").json(&payload).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                info!("✅ Gemma model responded successfully.");
+                Ok(true)
+            } else {
+                warn!("⚠️ Gemma model returned non-success status: {}", response.status());
+                Ok(false)
+            }
+        }
+        Err(e) => {
+            error!("❌ Failed to get response from Gemma model: {}", e);
+            Err(CommandError::Reqwest(e))
+        }
+    }
 }

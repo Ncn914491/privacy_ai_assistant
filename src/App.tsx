@@ -2,192 +2,121 @@ import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import ChatInterface from './components/ChatInterface';
 import BrowserModeBlocker from './components/BrowserModeBlocker';
+import StartupDiagnostic from './components/StartupDiagnostic'; // Import the diagnostic component
 import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
-import { modelHealthChecker } from './utils/modelHealth';
-import { getTauriStatus, waitForTauriEnvironment } from './utils/tauriDetection';
-import { debugTauriEnvironment, waitForWindowProperty } from './utils/tauriDebug';
+import { ensureEnvironment, EnvironmentCapabilities } from './utils/tauriDetection';
 
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error?: Error;
-}
-
-class ErrorBoundary extends React.Component<
-  React.PropsWithChildren<{}>,
-  ErrorBoundaryState
-> {
-  constructor(props: React.PropsWithChildren<{}>) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-900">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Something went wrong
-            </h2>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              The application encountered an error. Please refresh the page.
-            </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="btn-primary"
-            >
-              Refresh Page
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
+// Define application states
+type AppState = 'initializing' | 'diagnostics' | 'ready' | 'browser_mode' | 'error';
 
 const App: React.FC = () => {
   const { preferences, setSystemInfo, setAppVersion, setInitialized } = useAppStore();
-  const [ignoreBrowserWarning, setIgnoreBrowserWarning] = useState(false);
-  const [tauriStatus, setTauriStatus] = useState(getTauriStatus());
+  const [appState, setAppState] = useState<AppState>('initializing');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // Debug Tauri environment
-        debugTauriEnvironment();
+        console.log('🚀 Initializing application...');
+        const env = await ensureEnvironment();
 
-        // Try to wait for Tauri API to be available
-        try {
-          console.log('🔍 Waiting for window.__TAURI__ to be available...');
-          await waitForWindowProperty('__TAURI__', 3000);
-          console.log('✅ window.__TAURI__ is now available');
-        } catch (error) {
-          console.warn('⚠️ window.__TAURI__ not available:', error);
-        }
-
-        // Wait for Tauri environment to be ready
-        console.log('🔍 Waiting for Tauri environment...');
-        const tauriEnv = await waitForTauriEnvironment(5000);
-
-        // Update Tauri status
-        setTauriStatus(getTauriStatus());
-
-        // Check if running in Tauri environment
-        if (!tauriEnv.isTauri) {
-          console.log('⚠️  Running in browser mode - Tauri features disabled');
+        if (env.isBrowser) {
+          console.warn('🌐 Running in browser mode.');
+          setAppState('browser_mode');
           return;
         }
 
-        // Check if Tauri invoke is available
-        if (!tauriEnv.capabilities.invoke) {
-          console.error('❌ Tauri invoke is not available');
+        if (!env.hasInvoke) {
+          console.error('❌ Tauri environment detected, but invoke is missing!');
+          setError('Tauri API is not available. The app may be broken.');
+          setAppState('error');
           return;
         }
 
-        // Get system info
+        console.log('✅ Tauri environment confirmed. Running diagnostics...');
+        setAppState('diagnostics');
+
+        // Fetch initial data from backend
         const systemInfo = await invoke<SystemInfo>('get_system_info');
         setSystemInfo(systemInfo);
 
-        // Get app version
         const appVersion = await invoke<AppVersion>('get_app_version');
         setAppVersion(appVersion);
 
-        setInitialized(true);
+        await invoke('log_message', { message: 'App environment initialized.' });
         
-        // Log initialization
-        await invoke('log_message', { message: 'App initialized successfully' });
-        
-        // Initialize model health checking
-        console.log('Initializing model health checker...');
-        await modelHealthChecker.checkHealth();
-      } catch (error) {
-        console.error('Failed to initialize app:', error);
+      } catch (err) {
+        console.error('🚨 Failed to initialize app:', err);
+        setError(err instanceof Error ? err.message : String(err));
+        setAppState('error');
       }
     };
 
     initializeApp();
-  }, [setSystemInfo, setAppVersion, setInitialized]);
+  }, [setSystemInfo, setAppVersion]);
 
   useEffect(() => {
-    // Apply theme to HTML element
+    // Apply theme based on user preferences
     const root = document.documentElement;
-    
     if (preferences.theme === 'dark') {
       root.classList.add('dark');
-    } else if (preferences.theme === 'light') {
-      root.classList.remove('dark');
     } else {
-      // System theme
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (prefersDark) {
-        root.classList.add('dark');
-      } else {
-        root.classList.remove('dark');
-      }
+      root.classList.remove('dark');
     }
   }, [preferences.theme]);
 
-  useEffect(() => {
-    // Handle keyboard shortcuts
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+/ to focus input
-      if (e.ctrlKey && e.key === '/') {
-        e.preventDefault();
-        const textarea = document.querySelector('textarea');
-        if (textarea) {
-          textarea.focus();
-        }
-      }
+  const handleDiagnosticComplete = (success: boolean) => {
+    if (success) {
+      console.log('✅ Diagnostics passed. Application is ready.');
+      setInitialized(true);
+      setAppState('ready');
+    } else {
+      console.warn('⚠️ Diagnostics failed. App will have limited functionality.');
+      // You might want to keep the user on the diagnostics screen
+      // or move to a limited 'ready' state. For now, we proceed.
+      setInitialized(true);
+      setAppState('ready');
+    }
+  };
+
+  const renderContent = () => {
+    switch (appState) {
+      case 'initializing':
+        return <div className="loading-screen"><h2>Initializing...</h2></div>;
       
-      // Escape to clear input
-      if (e.key === 'Escape') {
-        const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
-        if (textarea && textarea === document.activeElement) {
-          textarea.blur();
-        }
-      }
-    };
+      case 'diagnostics':
+        return (
+          <StartupDiagnostic
+            onDiagnosticComplete={handleDiagnosticComplete}
+          />
+        );
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+      case 'ready':
+        return <ChatInterface />;
 
-  // Show browser mode blocker if not in Tauri environment
-  if (tauriStatus.status !== 'connected' && !ignoreBrowserWarning) {
-    return (
-      <ErrorBoundary>
-        <BrowserModeBlocker 
-          onIgnoreWarning={() => setIgnoreBrowserWarning(true)}
-        />
-      </ErrorBoundary>
-    );
-  }
+      case 'browser_mode':
+        return <BrowserModeBlocker onIgnoreWarning={() => setAppState('ready')} />;
+
+      case 'error':
+        return <div className="error-screen"><h2>Error: {error}</h2></div>;
+
+      default:
+        return <div className="error-screen"><h2>Invalid State</h2></div>;
+    }
+  };
 
   return (
-    <ErrorBoundary>
-      <div className={cn(
-        'h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100',
-        'transition-colors duration-300'
-      )}>
-        <main className="h-full">
-          <ChatInterface />
-        </main>
-      </div>
-    </ErrorBoundary>
+    <div className={cn(
+      'h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100',
+      'transition-colors duration-300'
+    )}>
+      <main className="h-full">
+        {renderContent()}
+      </main>
+    </div>
   );
 };
 
