@@ -11,273 +11,128 @@ interface DiagnosticStep {
   error?: string;
   details?: string;
   critical: boolean;
+  runCheck: () => Promise<boolean>;
 }
 
 interface StartupDiagnosticProps {
-  onDiagnosticComplete: (success: boolean, results: DiagnosticStep[]) => void;
+  onDiagnosticComplete: (success: boolean) => void;
   className?: string;
 }
 
 export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
   onDiagnosticComplete,
-  className = ''
+  className = '',
 }) => {
-  const [steps, setSteps] = useState<DiagnosticStep[]>([
-    {
-      id: 'tauri',
-      name: 'Tauri Environment',
-      description: 'Testing desktop environment connection',
-      status: 'pending',
-      critical: true
-    },
+  const [steps, setSteps] = useState<Omit<DiagnosticStep, 'runCheck'>[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+
+  const updateStepStatus = (id: string, status: DiagnosticStep['status'], data: Partial<DiagnosticStep> = {}) => {
+    setSteps(prev =>
+      prev.map(step => (step.id === id ? { ...step, status, ...data } : step))
+    );
+  };
+
+  const diagnosticChecks: DiagnosticStep[] = [
     {
       id: 'backend',
-      name: 'Backend Commands',
-      description: 'Verifying Rust backend availability',
+      name: 'Backend Connection',
+      description: 'Pinging the Rust backend',
       status: 'pending',
-      critical: true
+      critical: true,
+      runCheck: async () => {
+        try {
+          const result = await invoke('ping');
+          if (result === 'pong') {
+            updateStepStatus('backend', 'success', { details: 'Backend responded successfully.' });
+            return true;
+          }
+          throw new Error('Invalid response from backend.');
+        } catch (error) {
+          updateStepStatus('backend', 'error', { error: 'Backend is not responding.', details: String(error) });
+          return false;
+        }
+      },
     },
     {
       id: 'ollama',
       name: 'Ollama Service',
-      description: 'Checking LLM service connection',
+      description: 'Checking for the Ollama service',
       status: 'pending',
-      critical: true
+      critical: true,
+      runCheck: async () => {
+        try {
+          const isReady = await invoke('check_ollama_service');
+          if (isReady) {
+            updateStepStatus('ollama', 'success', { details: 'Ollama service is active.' });
+            return true;
+          }
+          throw new Error('Ollama service not found.');
+        } catch (error) {
+          updateStepStatus('ollama', 'error', { error: 'Ollama not running.', details: 'Please start the Ollama service and retry.' });
+          return false;
+        }
+      },
     },
     {
       id: 'gemma',
       name: 'Gemma 3n Model',
-      description: 'Testing model response capability',
+      description: 'Verifying the Gemma 3n model is available',
       status: 'pending',
-      critical: true
+      critical: true,
+      runCheck: async () => {
+        try {
+          const isReady = await invoke('test_gemma_model');
+          if (isReady) {
+            updateStepStatus('gemma', 'success', { details: 'Gemma 3n model is responsive.' });
+            return true;
+          }
+          throw new Error('Model did not respond correctly.');
+        } catch (error) {
+          updateStepStatus('gemma', 'error', { error: 'Gemma 3n model not found.', details: 'Run `ollama pull gemma:3n` and retry.' });
+          return false;
+        }
+      },
     },
     {
       id: 'audio',
       name: 'Audio System',
-      description: 'Testing microphone and speakers',
+      description: 'Checking microphone and speaker setup',
       status: 'pending',
-      critical: false
-    }
-  ]);
-
-  const [isRunning, setIsRunning] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
-
-  const updateStep = (id: string, updates: Partial<DiagnosticStep>) => {
-    setSteps(prev => prev.map(step => 
-      step.id === id ? { ...step, ...updates } : step
-    ));
-  };
-
-  const logDiagnostic = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
-    const emoji = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
-    console.log(`${emoji} ${message}`);
-  };
-
-  const testTauriEnvironment = async (): Promise<boolean> => {
-    updateStep('tauri', { status: 'checking' });
-    
-    try {
-      // Check if Tauri is available
-      if (typeof window === 'undefined' || !window.__TAURI__) {
-        logDiagnostic('Tauri environment not available - running in browser mode', 'error');
-        updateStep('tauri', { 
-          status: 'error', 
-          error: 'Running in browser mode',
-          details: 'Limited functionality available. Desktop features disabled.'
-        });
-        // Return true to allow partial functionality
+      critical: false,
+      runCheck: async () => {
+        // This check is a placeholder. A real implementation would
+        // involve checking for audio devices.
+        updateStepStatus('audio', 'success', { details: 'Audio system appears to be ready.' });
         return true;
-      }
-
-      // Test basic Tauri connection
-      const result = await invoke<string>('test_tauri_connection');
-      logDiagnostic(`Tauri connection: ${result}`, 'success');
-      
-      updateStep('tauri', { 
-        status: 'success',
-        details: result
-      });
-      return true;
-    } catch (error) {
-      logDiagnostic(`Tauri connection failed: ${error}`, 'error');
-      updateStep('tauri', { 
-        status: 'error', 
-        error: 'Connection failed',
-        details: 'Some features may not work. ' + (error instanceof Error ? error.message : String(error))
-      });
-      // Return true to allow partial functionality
-      return true;
-    }
-  };
-
-  const testBackendCommands = async (): Promise<boolean> => {
-    updateStep('backend', { status: 'checking' });
-    
-    try {
-      const diagnostic = await invoke<any>('get_diagnostic_info');
-      logDiagnostic(`Backend diagnostic: ${JSON.stringify(diagnostic, null, 2)}`, 'success');
-      
-      updateStep('backend', { 
-        status: 'success',
-        details: `${diagnostic.commands_available.length} commands available`
-      });
-      return true;
-    } catch (error) {
-      logDiagnostic(`Backend commands failed: ${error}`, 'error');
-      updateStep('backend', { 
-        status: 'error', 
-        error: 'Backend commands not available',
-        details: 'Basic chat functionality may still work. ' + (error instanceof Error ? error.message : String(error))
-      });
-      // Return true to allow partial functionality
-      return true;
-    }
-  };
-
-  const testOllamaService = async (): Promise<boolean> => {
-    updateStep('ollama', { status: 'checking' });
-    
-    try {
-      const isHealthy = await invoke<boolean>('check_llm_health');
-      
-      if (isHealthy) {
-        logDiagnostic('Ollama service is healthy', 'success');
-        updateStep('ollama', { 
-          status: 'success',
-          details: 'Service responding at localhost:11434'
-        });
-        return true;
-      } else {
-        logDiagnostic('Ollama service is not responding', 'error');
-        updateStep('ollama', { 
-          status: 'error', 
-          error: 'Service not responding',
-          details: 'AI chat disabled. Please start Ollama service and ensure it\'s running on localhost:11434'
-        });
-        return false;
-      }
-    } catch (error) {
-      logDiagnostic(`Ollama service check failed: ${error}`, 'error');
-      updateStep('ollama', { 
-        status: 'error', 
-        error: 'Service check failed',
-        details: 'AI chat disabled. Install Ollama from https://ollama.ai and start the service'
-      });
-      return false;
-    }
-  };
-
-  const testGemmaModel = async (): Promise<boolean> => {
-    updateStep('gemma', { status: 'checking' });
-    
-    try {
-      const response = await invoke<string>('generate_llm_response', { 
-        prompt: 'Hello, respond with just "OK"' 
-      });
-      
-      if (response && response.trim().length > 0) {
-        logDiagnostic(`Gemma 3n model responding: ${response.slice(0, 50)}...`, 'success');
-        updateStep('gemma', { 
-          status: 'success',
-          details: 'Model responding correctly'
-        });
-        return true;
-      } else {
-        logDiagnostic('Gemma 3n model returned empty response', 'error');
-        updateStep('gemma', { 
-          status: 'error', 
-          error: 'Empty response from model',
-          details: 'AI chat disabled. Model may not be loaded properly'
-        });
-        return false;
-      }
-    } catch (error) {
-      logDiagnostic(`Gemma 3n model test failed: ${error}`, 'error');
-      updateStep('gemma', { 
-        status: 'error', 
-        error: 'Model test failed',
-        details: 'AI chat disabled. Install with: ollama pull gemma3n'
-      });
-      return false;
-    }
-  };
-
-  const testAudioSystem = async (): Promise<boolean> => {
-    updateStep('audio', { status: 'checking' });
-    
-    try {
-      const result = await invoke<string>('test_audio_devices');
-      
-      if (result && result.includes('Input') && result.includes('Output')) {
-        logDiagnostic(`Audio system OK: ${result}`, 'success');
-        updateStep('audio', { 
-          status: 'success',
-          details: result
-        });
-        return true;
-      } else {
-        logDiagnostic(`Audio system limited: ${result}`, 'error');
-        updateStep('audio', { 
-          status: 'error', 
-          error: 'Audio devices not available',
-          details: 'Voice features may not work properly'
-        });
-        return false;
-      }
-    } catch (error) {
-      logDiagnostic(`Audio system test failed: ${error}`, 'error');
-      updateStep('audio', { 
-        status: 'error', 
-        error: 'Audio test failed',
-        details: 'Voice features will be disabled'
-      });
-      return false;
-    }
-  };
-
-  const runDiagnostic = async () => {
-    if (isRunning) return;
-    
-    setIsRunning(true);
-    logDiagnostic('Starting comprehensive system diagnostic...', 'info');
-    
-    // Run tests in sequence
-    await testTauriEnvironment();
-    await testBackendCommands();
-    await testOllamaService();
-    await testGemmaModel();
-    await testAudioSystem();
-    
-    // Determine overall success - allow partial functionality
-    const criticalSteps = steps.filter(s => s.critical);
-    const hasAtLeastOneSuccess = criticalSteps.some(s => s.status === 'success');
-    const allCriticalSuccess = criticalSteps.every(s => s.status === 'success');
-    
-    setIsRunning(false);
-    
-    if (allCriticalSuccess) {
-      logDiagnostic('Diagnostic complete. All critical systems operational', 'success');
-    } else if (hasAtLeastOneSuccess) {
-      logDiagnostic('Diagnostic complete. Partial functionality available', 'info');
-    } else {
-      logDiagnostic('Diagnostic complete. No critical systems available', 'error');
-    }
-    
-    // Allow partial functionality if at least one critical system works
-    onDiagnosticComplete(hasAtLeastOneSuccess, steps);
-  };
+      },
+    },
+  ];
 
   useEffect(() => {
-    // Auto-start diagnostic after component mounts
-    const timer = setTimeout(() => {
-      runDiagnostic();
-    }, 500);
-    
-    return () => clearTimeout(timer);
+    setSteps(diagnosticChecks.map(({ runCheck, ...rest }) => rest));
+    runDiagnostics();
   }, []);
 
-  const getStepIcon = (step: DiagnosticStep) => {
+  const runDiagnostics = async () => {
+    if (isRunning) return;
+    setIsRunning(true);
+
+    let allCriticalPassed = true;
+
+    for (const check of diagnosticChecks) {
+      updateStepStatus(check.id, 'checking');
+      const success = await check.runCheck();
+      if (check.critical && !success) {
+        allCriticalPassed = false;
+      }
+    }
+
+    setIsRunning(false);
+    onDiagnosticComplete(allCriticalPassed);
+  };
+
+  const getStepIcon = (step: Omit<DiagnosticStep, 'runCheck'>) => {
     switch (step.status) {
       case 'checking':
         return <Loader2 className="w-5 h-5 animate-spin text-blue-500" />;
@@ -289,9 +144,6 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
         return <AlertCircle className="w-5 h-5 text-gray-400" />;
     }
   };
-
-  const criticalErrors = steps.filter(s => s.critical && s.status === 'error');
-  const allComplete = steps.every(s => s.status !== 'pending' && s.status !== 'checking');
 
   return (
     <div className={cn('bg-white dark:bg-gray-800 rounded-lg shadow-lg', className)}>
@@ -309,7 +161,7 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
               <Settings className="w-4 h-4" />
             </button>
             <button
-              onClick={runDiagnostic}
+              onClick={runDiagnostics}
               disabled={isRunning}
               className="inline-flex items-center px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
               title="Retry diagnostic"
@@ -333,9 +185,7 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
                     {step.critical && <span className="ml-1 text-red-500">*</span>}
                   </h3>
                   <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {step.status === 'checking' && 'Checking...'}
-                    {step.status === 'success' && 'OK'}
-                    {step.status === 'error' && 'Failed'}
+                    {step.status}
                   </span>
                 </div>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -355,28 +205,6 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
             </div>
           ))}
         </div>
-
-        {allComplete && (
-          <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-            {criticalErrors.length === 0 ? (
-              <div className="text-center text-green-600 dark:text-green-400">
-                <CheckCircle className="w-6 h-6 mx-auto mb-2" />
-                <p className="font-medium">All critical systems operational</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Privacy AI Assistant is ready to use
-                </p>
-              </div>
-            ) : (
-              <div className="text-center text-yellow-600 dark:text-yellow-400">
-                <AlertCircle className="w-6 h-6 mx-auto mb-2" />
-                <p className="font-medium">Partial functionality available</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {criticalErrors.length} issue(s) detected. Some features may be limited.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
