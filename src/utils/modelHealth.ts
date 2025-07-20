@@ -20,7 +20,7 @@ export class ModelHealthChecker {
     lastChecked: null,
     error: null,
     connectionState: 'disconnected',
-    modelName: 'Gemma 3n',
+    modelName: 'gemma3n:latest',
     serviceUrl: 'http://localhost:11434',
     lastSuccessfulCheck: null,
   };
@@ -152,7 +152,7 @@ export class ModelHealthChecker {
         statusText = `${status.modelName} is not available`;
         recommendations = [
           'Ensure Ollama is running on your system',
-          'Check if the Gemma 3n model is installed: ollama pull gemma3n',
+          'Check if the Gemma 3n model is installed: ollama pull gemma3n:latest',
           'Verify Ollama is accessible at ' + status.serviceUrl
         ];
         break;
@@ -184,7 +184,7 @@ export class ModelHealthChecker {
       const isHealthy = await this.checkHealth();
       return {
         installed: isHealthy,
-        availableModels: isHealthy ? ['gemma3n'] : []
+        availableModels: isHealthy ? ['gemma3n:latest'] : []
       };
     } catch (error) {
       console.error('Failed to check model installation:', error);

@@ -11,49 +11,60 @@ import { AlertTriangle, Settings } from 'lucide-react';
 import { TAURI_ENV } from '../utils/tauriDetection';
 import { SttResult } from '../types';
 import { useStreamingLLM } from '../hooks/useStreamingLLM';
+import { usePythonBackendLLM } from '../hooks/usePythonBackendLLM';
+import { usePythonBackendStreaming } from '../hooks/usePythonBackendStreaming';
 import VoiceRecordingModal from './VoiceRecordingModal';
+import RealtimeVoiceModal from './RealtimeVoiceModal';
 
 
 const ChatInterface: React.FC = () => {
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const [showRealtimeVoiceModal, setShowRealtimeVoiceModal] = useState(false);
+  const [useRealtimeSTT, setUseRealtimeSTT] = useState(true); // Default to new system
   const { messages, addMessage, updateMessage, setLoading, isLoading } = useChatStore();
   const { streamingState, startStream, stopStream, resetStream } = useStreamingLLM();
   const currentStreamingMessageId = useRef<string | null>(null);
 
-  // Monitor streaming state and update messages in real-time
+  // Python backend integration
+  const {
+    backendHealth,
+    availableModels,
+    startBackend,
+    stopBackend,
+    checkBackendHealth,
+    sendPrompt,
+    getAvailableModels,
+    isLoading: backendLoading,
+    error: backendError
+  } = usePythonBackendLLM();
+
+  // Python backend streaming
+  const {
+    streamingState: pythonStreamingState,
+    startStream: startPythonStream,
+    stopStream: stopPythonStream,
+    resetStream: resetPythonStream
+  } = usePythonBackendStreaming();
+
+  // Monitor streaming state for debugging (keeping this for fallback)
   useEffect(() => {
-    if (currentStreamingMessageId.current && streamingState.streamedContent) {
-      console.log('🔄 Updating streaming message with content:', streamingState.streamedContent.length, 'chars');
-      updateMessage(currentStreamingMessageId.current, {
-        content: streamingState.streamedContent
-      });
-    }
+    console.log('🔍 Streaming state changed:', {
+      isStreaming: streamingState.isStreaming,
+      contentLength: streamingState.streamedContent.length,
+      error: streamingState.error,
+      currentMessageId: currentStreamingMessageId.current
+    });
 
-    // Handle streaming completion
-    if (currentStreamingMessageId.current && !streamingState.isStreaming && streamingState.streamedContent) {
-      console.log('✅ Streaming completed, final content length:', streamingState.streamedContent.length);
-
-      // TTS for completed responses (skip for very long responses)
-      if (ttsEnabled && streamingState.streamedContent.length < 1000) {
-        invoke('run_piper_tts', { text: streamingState.streamedContent }).catch((error) => {
-          console.error('TTS Error:', error);
-        });
-      }
-
-      // Clear the streaming message ID
-      currentStreamingMessageId.current = null;
-    }
-
-    // Handle streaming errors
+    // This is now mainly for debugging - real updates happen via callbacks
     if (currentStreamingMessageId.current && streamingState.error) {
-      console.error('❌ Streaming error, updating message:', streamingState.error);
+      console.error('❌ Streaming error detected in useEffect:', streamingState.error);
       updateMessage(currentStreamingMessageId.current, {
         content: getErrorMessage(streamingState.error)
       });
       currentStreamingMessageId.current = null;
     }
-  }, [streamingState, updateMessage, ttsEnabled]);
+  }, [streamingState, updateMessage]);
 
   const [modelHealth, setModelHealth] = useState<ModelHealthStatus>({
     isAvailable: false,
@@ -131,12 +142,115 @@ const ChatInterface: React.FC = () => {
   const handleTestStreaming = async () => {
     try {
       console.log('🧪 Testing streaming functionality...');
+
+      // Add a test message that will be updated in real-time
+      const testMessageId = Date.now();
+      addMessage('🧪 Starting streaming test...', 'assistant', testMessageId);
+      let testContent = '';
+
+      // Start the test stream with direct event listening
       const streamId = await invoke<string>('test_streaming');
-      console.log('✅ Test streaming completed with ID:', streamId);
-      addMessage('🧪 Streaming test completed successfully!', 'assistant');
+      console.log('✅ Test streaming started with ID:', streamId);
+
+      // Listen for test streaming events directly
+      const { listen } = await import('@tauri-apps/api/event');
+      const eventName = `llm_stream_${streamId}`;
+      console.log('🎧 Listening for test events on:', eventName);
+
+      const unlisten = await listen(eventName, (event) => {
+        console.log('📤 Test event received:', event);
+        const payload = event.payload as { stream_id: string; event_type: string; data: string };
+
+        switch (payload.event_type) {
+          case 'chunk':
+            console.log('📝 Test chunk received:', payload.data);
+            testContent += payload.data;
+            updateMessage(testMessageId.toString(), { content: `🧪 Test: ${testContent}` });
+            break;
+          case 'complete':
+            console.log('✅ Test streaming completed');
+            updateMessage(testMessageId.toString(), { content: `✅ Test completed: ${testContent}` });
+            unlisten();
+            break;
+          case 'error':
+            console.error('❌ Test streaming error:', payload.data);
+            updateMessage(testMessageId.toString(), { content: `❌ Test failed: ${payload.data}` });
+            unlisten();
+            break;
+        }
+      });
+
     } catch (error) {
       console.error('❌ Streaming test failed:', error);
       addMessage(`❌ Streaming test failed: ${error}`, 'assistant');
+    }
+  };
+
+  // 🧪 Test function for Vosk installation
+  const handleTestVosk = async () => {
+    try {
+      console.log('🧪 Testing Vosk installation...');
+      const result = await invoke<string>('test_vosk_installation');
+      console.log('✅ Vosk test result:', result);
+      addMessage(`✅ Vosk test: ${result}`, 'assistant');
+    } catch (error) {
+      console.error('❌ Vosk test failed:', error);
+      addMessage(`❌ Vosk test failed: ${error}`, 'assistant');
+    }
+  };
+
+  // 🧪 Test function for voice-to-LLM pipeline
+  const handleTestVoicePipeline = async () => {
+    try {
+      console.log('🧪 Testing voice-to-LLM pipeline...');
+
+      // Simulate a voice transcription
+      const testTranscription = "Hello, this is a test of the voice to LLM pipeline";
+      console.log('🎤 Simulating voice transcription:', testTranscription);
+
+      // Call the voice transcription handler directly
+      handleVoiceTranscription(testTranscription);
+
+    } catch (error) {
+      console.error('❌ Voice pipeline test failed:', error);
+      addMessage(`❌ Voice pipeline test failed: ${error}`, 'assistant');
+    }
+  };
+
+  // 🐍 Test Python backend
+  const handleTestPythonBackend = async () => {
+    try {
+      console.log('🐍 Testing Python backend...');
+      addMessage('🐍 Testing Python backend...', 'assistant');
+
+      // Start backend if not running
+      if (!backendHealth) {
+        console.log('🚀 Starting Python backend...');
+        addMessage('🚀 Starting Python backend...', 'assistant');
+        await startBackend();
+      }
+
+      // Check health
+      const isHealthy = await checkBackendHealth();
+      if (isHealthy) {
+        addMessage('✅ Python backend is healthy and ready', 'assistant');
+
+        // Get available models
+        const models = await getAvailableModels();
+        addMessage(`📋 Available models: ${models.map(m => m.name).join(', ')}`, 'assistant');
+
+        // Test LLM request
+        console.log('🤖 Testing LLM request...');
+        addMessage('🤖 Testing LLM request...', 'assistant');
+        const response = await sendPrompt('Say "Hello from Python backend!"');
+        addMessage(`🤖 LLM Response: ${response}`, 'assistant');
+      } else {
+        addMessage('❌ Python backend health check failed', 'assistant');
+      }
+
+    } catch (error) {
+      console.error('❌ Python backend test failed:', error);
+      addMessage(`❌ Python backend test failed: ${error}`, 'assistant');
     }
   };
 
@@ -183,15 +297,20 @@ const ChatInterface: React.FC = () => {
   };
 
   const handleSendMessage = async (content: string) => {
+    console.log('🚀 handleSendMessage called with content:', content);
+    console.log('🚀 Content length:', content.length);
+
     addMessage(content, 'user');
     setLoading(true);
-
-    // Reset any previous stream
-    resetStream();
 
     // Add a streaming message placeholder
     const streamingMessageId = Date.now();
     addMessage('🤔 Thinking...', 'assistant', streamingMessageId);
+
+    console.log('📝 Created streaming message with ID:', streamingMessageId);
+
+    // Store the streaming message ID immediately for stop button functionality
+    currentStreamingMessageId.current = streamingMessageId.toString();
 
     try {
       // Check if running in Tauri environment
@@ -204,52 +323,47 @@ const ChatInterface: React.FC = () => {
         return;
       }
 
-      // First check if model is available
-      const isHealthy = await modelHealthChecker.checkHealth();
-
-      if (!isHealthy) {
-        throw new Error('Gemma 3n model is not running. Please start it via Ollama.');
+      // Check if Python backend is healthy
+      const isBackendHealthy = await checkBackendHealth();
+      if (!isBackendHealthy) {
+        console.log('🚀 Starting Python backend...');
+        updateMessage(streamingMessageId.toString(), { content: '🚀 Starting AI backend...' });
+        await startBackend();
       }
 
-      console.log('🚀 Starting streaming response for:', content);
+      console.log('🐍 Using Python backend streaming for LLM request...');
+      updateMessage(streamingMessageId.toString(), { content: '🤖 Generating response...' });
 
-      // Store the streaming message ID for real-time updates
-      currentStreamingMessageId.current = streamingMessageId.toString();
-
-      // Try streaming first
-      try {
-        await startStream(content);
-
-        // Update the message to show streaming started
-        updateMessage(streamingMessageId.toString(), { content: '🔄 Generating response...' });
-
-        console.log('✅ Streaming started successfully, message ID:', streamingMessageId);
-
-        // The useEffect will handle real-time updates
-        setLoading(false);
-
-      } catch (streamError) {
-        console.warn('⚠️ Streaming failed, falling back to regular response:', streamError);
-
-        // Clear the streaming message ID since streaming failed
-        currentStreamingMessageId.current = null;
-
-        // Fallback to non-streaming response
-        const response = await invoke<string>('generate_llm_response', { prompt: content });
-
-        if (!response || response.trim().length === 0) {
-          throw new Error('Empty or malformed response from the model.');
+      // Use Python backend streaming for LLM request
+      let fullResponse = '';
+      await startPythonStream(
+        content,
+        'gemma3n:latest',
+        // onChunk callback
+        (chunk: string) => {
+          fullResponse += chunk;
+          updateMessage(streamingMessageId.toString(), { content: fullResponse });
+        },
+        // onComplete callback
+        () => {
+          console.log('✅ Streaming completed, final response length:', fullResponse.length);
+          // TTS for responses (skip for very long responses)
+          if (ttsEnabled && fullResponse.length < 1000) {
+            console.log('🔊 Starting TTS for response...');
+            invoke('run_piper_tts', { text: fullResponse }).catch((error) => {
+              console.error('TTS Error:', error);
+            });
+          } else if (fullResponse.length >= 1000) {
+            console.log('⏭️ Skipping TTS for long response (length:', fullResponse.length, ')');
+          }
+        },
+        // onError callback
+        (error: string) => {
+          console.error('❌ Streaming error:', error);
+          const errorMessage = getErrorMessage(error);
+          updateMessage(streamingMessageId.toString(), { content: errorMessage });
         }
-
-        updateMessage(streamingMessageId.toString(), { content: response.trim() });
-
-        // TTS for responses (skip for very long responses)
-        if (ttsEnabled && response.length < 1000) {
-          invoke('run_piper_tts', { text: response.trim() }).catch((error) => {
-            console.error('TTS Error:', error);
-          });
-        }
-      }
+      );
 
     } catch (error) {
       console.error('❌ Error in handleSendMessage:', error);
@@ -266,15 +380,50 @@ const ChatInterface: React.FC = () => {
 
   // Voice input handlers
   const handleVoiceInput = () => {
-    setShowVoiceModal(true);
+    if (useRealtimeSTT) {
+      setShowRealtimeVoiceModal(true);
+    } else {
+      setShowVoiceModal(true);
+    }
   };
 
   const handleVoiceTranscription = (transcription: string) => {
     console.log('🎤 Voice transcription received:', transcription);
+    console.log('🎤 Transcription length:', transcription.length);
+    console.log('🎤 Transcription content:', JSON.stringify(transcription));
+    console.log('🎤 Current system ready state:', systemReady);
+    console.log('🎤 Current model health:', modelHealth);
+    console.log('🎤 Current streaming state:', streamingState);
+
     setShowVoiceModal(false);
 
-    // Send the transcribed text as a message
-    handleSendMessage(transcription);
+    // Validate transcription before sending
+    if (!transcription || transcription.trim().length === 0) {
+      console.warn('⚠️ Empty transcription received, not sending to LLM');
+      addMessage('❌ No speech detected. Please try again.', 'assistant');
+      return;
+    }
+
+    // Check system readiness
+    if (!systemReady) {
+      console.warn('⚠️ System not ready, cannot process voice input');
+      addMessage('❌ System not ready. Please wait for initialization to complete.', 'assistant');
+      return;
+    }
+
+    if (!modelHealth.isAvailable) {
+      console.warn('⚠️ Model not available, cannot process voice input');
+      addMessage('❌ AI model not available. Please check the model status.', 'assistant');
+      return;
+    }
+
+    console.log('🚀 All checks passed, sending transcription to LLM:', transcription);
+
+    // Send the transcribed text as a message with a small delay to ensure UI updates
+    setTimeout(() => {
+      console.log('🚀 Calling handleSendMessage with transcription');
+      handleSendMessage(transcription);
+    }, 100);
   };
 
   const handleVoiceRecordingStateChange = (isRecording: boolean) => {
@@ -311,11 +460,25 @@ const ChatInterface: React.FC = () => {
             </button>
           )}
 
-          {/* Stop Response Button */}
-          {streamingState.isStreaming && (
+          {/* Stop Response Button - Show during loading or streaming */}
+          {(streamingState.isStreaming || (isLoading && currentStreamingMessageId.current)) && (
             <button
               type="button"
-              onClick={stopStream}
+              onClick={async () => {
+                console.log('⏹️ Stop button clicked');
+                if (streamingState.isStreaming) {
+                  console.log('⏹️ Stopping active stream');
+                  await stopStream();
+                } else if (currentStreamingMessageId.current) {
+                  console.log('⏹️ Canceling loading state');
+                  // Cancel the loading state and update the message
+                  setLoading(false);
+                  updateMessage(currentStreamingMessageId.current, {
+                    content: '❌ Response canceled by user'
+                  });
+                  currentStreamingMessageId.current = null;
+                }
+              }}
               className="px-3 py-1 text-xs bg-red-500 text-white rounded-md hover:bg-red-600"
               title="Stop response"
             >
@@ -334,6 +497,33 @@ const ChatInterface: React.FC = () => {
                 title="Test streaming functionality"
               >
                 🧪 Test Stream
+              </button>
+              <button
+                type="button"
+                onClick={handleTestVosk}
+                disabled={isLoading || streamingState.isStreaming}
+                className="px-3 py-1 text-xs bg-purple-500 text-white rounded-md hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Test Vosk STT installation"
+              >
+                🎤 Test Vosk
+              </button>
+              <button
+                type="button"
+                onClick={handleTestVoicePipeline}
+                disabled={isLoading || streamingState.isStreaming}
+                className="px-3 py-1 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Test voice-to-LLM pipeline"
+              >
+                🔄 Test Pipeline
+              </button>
+              <button
+                type="button"
+                onClick={handleTestPythonBackend}
+                disabled={isLoading || streamingState.isStreaming}
+                className="px-3 py-1 text-xs bg-green-500 text-white rounded-md hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Test Python backend integration"
+              >
+                🐍 Test Backend
               </button>
               <button
                 type="button"
@@ -463,6 +653,16 @@ const ChatInterface: React.FC = () => {
         <VoiceRecordingModal
           isOpen={showVoiceModal}
           onClose={() => setShowVoiceModal(false)}
+          onTranscriptionComplete={handleVoiceTranscription}
+          onRecordingStateChange={handleVoiceRecordingStateChange}
+        />
+      )}
+
+      {/* Real-time Voice Recording Modal */}
+      {showRealtimeVoiceModal && (
+        <RealtimeVoiceModal
+          isOpen={showRealtimeVoiceModal}
+          onClose={() => setShowRealtimeVoiceModal(false)}
           onTranscriptionComplete={handleVoiceTranscription}
           onRecordingStateChange={handleVoiceRecordingStateChange}
         />

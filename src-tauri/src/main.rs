@@ -8,10 +8,12 @@ use tauri::Manager;
 mod commands;
 mod llm;
 mod stt_tts;
+mod python_backend;
 
 use commands::*;
 use llm::*;
 use stt_tts::*;
+use python_backend::*;
 
 #[tauri::command]
 fn ping() -> String {
@@ -50,6 +52,13 @@ fn main() {
             stop_llm_stream,
             test_streaming,
 
+            // Python backend commands
+            start_python_backend,
+            stop_python_backend,
+            check_python_backend,
+            send_llm_request_to_backend,
+            get_ollama_models_from_backend,
+
             // STT/TTS commands
             run_vosk_stt,
             run_piper_tts,
@@ -60,7 +69,9 @@ fn main() {
             test_path_escaping,
             test_static_file_stt,
             process_audio_file,
-            process_audio_data
+            process_audio_data,
+            vosk_transcribe,
+            test_vosk_installation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

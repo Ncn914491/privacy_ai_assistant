@@ -11,7 +11,7 @@ interface StreamingState {
 
 interface UseStreamingLLMReturn {
   streamingState: StreamingState;
-  startStream: (prompt: string) => Promise<void>;
+  startStream: (prompt: string, onChunk?: (chunk: string) => void, onComplete?: () => void, onError?: (error: string) => void) => Promise<void>;
   stopStream: () => Promise<void>;
   resetStream: () => void;
 }
@@ -26,7 +26,12 @@ export const useStreamingLLM = (): UseStreamingLLMReturn => {
 
   const unlistenRef = useRef<(() => void) | null>(null);
 
-  const startStream = useCallback(async (prompt: string) => {
+  const startStream = useCallback(async (
+    prompt: string,
+    onChunk?: (chunk: string) => void,
+    onComplete?: () => void,
+    onError?: (error: string) => void
+  ) => {
     try {
       console.log('🚀 Starting LLM stream for prompt:', prompt);
       console.log('🔍 Prompt length:', prompt.length);
@@ -65,6 +70,13 @@ export const useStreamingLLM = (): UseStreamingLLMReturn => {
             setStreamingState(prev => {
               const newContent = prev.streamedContent + payload.data;
               console.log('📝 Updated content length:', newContent.length);
+
+              // Call the onChunk callback immediately for real-time updates
+              if (onChunk) {
+                console.log('📞 Calling onChunk callback with:', payload.data);
+                onChunk(payload.data);
+              }
+
               return {
                 ...prev,
                 streamedContent: newContent,
@@ -78,6 +90,13 @@ export const useStreamingLLM = (): UseStreamingLLMReturn => {
               ...prev,
               isStreaming: false,
             }));
+
+            // Call the onComplete callback
+            if (onComplete) {
+              console.log('📞 Calling onComplete callback');
+              onComplete();
+            }
+
             if (unlistenRef.current) {
               unlistenRef.current();
               unlistenRef.current = null;
@@ -91,6 +110,13 @@ export const useStreamingLLM = (): UseStreamingLLMReturn => {
               isStreaming: false,
               error: payload.data,
             }));
+
+            // Call the onError callback
+            if (onError) {
+              console.log('📞 Calling onError callback with:', payload.data);
+              onError(payload.data);
+            }
+
             if (unlistenRef.current) {
               unlistenRef.current();
               unlistenRef.current = null;

@@ -159,7 +159,7 @@ pub async fn test_gemma_model() -> Result<bool, CommandError> {
     info!("Testing Gemma 3n model...");
     let client = reqwest::Client::new();
     let payload = serde_json::json!({
-        "model": "gemma3n",
+        "model": "gemma3n:latest",
         "prompt": "Respond with 'ok'",
         "stream": false
     });

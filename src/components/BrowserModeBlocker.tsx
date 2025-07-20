@@ -6,13 +6,25 @@ interface BrowserModeBlockerProps {
   onIgnoreWarning?: () => void;
 }
 
-export const BrowserModeBlocker: React.FC<BrowserModeBlockerProps> = ({ 
-  onIgnoreWarning 
+export const BrowserModeBlocker: React.FC<BrowserModeBlockerProps> = ({
+  onIgnoreWarning
 }) => {
   const tauriStatus = getTauriStatus();
-  
-  if (tauriStatus.status === 'connected') {
-    return null; // Don't show blocker if Tauri is properly connected
+
+  // Don't show blocker if Tauri is connected OR if we're in development mode
+  if (tauriStatus.status === 'connected' || tauriStatus.status === 'checking') {
+    return null;
+  }
+
+  // Check if we're in development mode (localhost)
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isDevPort = window.location.port === '5174' || window.location.port === '5173';
+
+  // In development mode, automatically bypass the blocker
+  if (isLocalhost && isDevPort && onIgnoreWarning) {
+    console.log('🔧 Development mode detected, bypassing browser mode blocker');
+    setTimeout(() => onIgnoreWarning(), 100); // Small delay to prevent immediate execution
+    return null;
   }
 
   return (

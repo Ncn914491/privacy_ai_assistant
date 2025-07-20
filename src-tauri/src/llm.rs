@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 // Configuration constants
 const OLLAMA_BASE_URL: &str = "http://localhost:11434";
-const DEFAULT_MODEL: &str = "gemma3n"; // Gemma 3n model as requested by user
+const DEFAULT_MODEL: &str = "gemma3n:latest"; // Standardized model name matching Ollama
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes for large LLM responses
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -433,25 +433,41 @@ pub async fn stop_llm_stream(stream_id: String) -> Result<(), String> {
 pub async fn test_streaming(app_handle: AppHandle) -> Result<String, String> {
     info!("🧪 Testing streaming functionality");
 
-    let test_stream_id = "test_stream_123".to_string();
-    let test_response = "This is a test streaming response to verify the functionality works correctly.";
+    let test_stream_id = format!("test_stream_{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis());
 
-    // Simulate streaming by sending chunks
-    let words: Vec<&str> = test_response.split_whitespace().collect();
-    let chunk_size = 2;
+    let test_response = "This is a test streaming response to verify the functionality works correctly. Each word should appear one by one in real-time.";
 
-    info!("🔄 Starting test stream with {} chunks", words.chunks(chunk_size).len());
+    // Clone for the background task
+    let stream_id_clone = test_stream_id.clone();
+    let app_handle_clone = app_handle.clone();
 
-    for (i, chunk) in words.chunks(chunk_size).enumerate() {
-        let chunk_text = chunk.join(" ") + " ";
-        info!("📤 Test chunk {}: '{}'", i + 1, chunk_text);
-        emit_stream_chunk(&app_handle, &test_stream_id, &chunk_text).await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    // Start streaming in background immediately
+    tokio::spawn(async move {
+        info!("🔄 Starting test stream background task for: {}", stream_id_clone);
 
-    emit_stream_complete(&app_handle, &test_stream_id).await;
-    info!("✅ Test streaming completed");
+        // Simulate streaming by sending chunks word by word
+        let words: Vec<&str> = test_response.split_whitespace().collect();
+        let chunk_size = 1; // Send one word at a time for better visual effect
 
+        info!("🔄 Starting test stream with {} chunks ({} words)", words.chunks(chunk_size).len(), words.len());
+
+        for (i, chunk) in words.chunks(chunk_size).enumerate() {
+            let chunk_text = chunk.join(" ") + " ";
+            info!("📤 Test chunk {}: '{}'", i + 1, chunk_text);
+            emit_stream_chunk(&app_handle_clone, &stream_id_clone, &chunk_text).await;
+
+            // Shorter delay for more responsive streaming
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+
+        emit_stream_complete(&app_handle_clone, &stream_id_clone).await;
+        info!("✅ Test streaming completed for: {}", stream_id_clone);
+    });
+
+    info!("✅ Test streaming command returning ID: {}", test_stream_id);
     Ok(test_stream_id)
 }
 
@@ -539,7 +555,7 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
 
                 // Simulate streaming by sending the response in chunks
                 let words: Vec<&str> = ollama_response.response.split_whitespace().collect();
-                let chunk_size = 2; // Send 2 words at a time
+                let chunk_size = 1; // Send 1 word at a time for better streaming effect
 
                 info!("🔄 Starting to emit {} chunks ({} words total)", words.chunks(chunk_size).len(), words.len());
 
@@ -548,8 +564,8 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
                     info!("📤 Emitting chunk {}: '{}'", i + 1, chunk_text);
                     emit_stream_chunk(app_handle, stream_id, &chunk_text).await;
 
-                    // Small delay to simulate streaming
-                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    // Shorter delay for more responsive streaming
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                 }
 
                 info!("✅ All chunks emitted, sending completion signal");
@@ -581,14 +597,17 @@ async fn stream_fallback_response(app_handle: &AppHandle, stream_id: &str, promp
         Ok(response) => {
             // Simulate streaming by sending chunks
             let words: Vec<&str> = response.split_whitespace().collect();
-            let chunk_size = 3; // Send 3 words at a time
+            let chunk_size = 1; // Send 1 word at a time for better streaming effect
 
-            for chunk in words.chunks(chunk_size) {
+            info!("🔄 Fallback streaming {} words in {} chunks", words.len(), words.chunks(chunk_size).len());
+
+            for (i, chunk) in words.chunks(chunk_size).enumerate() {
                 let chunk_text = chunk.join(" ") + " ";
+                info!("📤 Fallback chunk {}: '{}'", i + 1, chunk_text);
                 emit_stream_chunk(app_handle, stream_id, &chunk_text).await;
 
-                // Small delay to simulate streaming
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                // Shorter delay for more responsive streaming
+                tokio::time::sleep(Duration::from_millis(80)).await;
             }
 
             emit_stream_complete(app_handle, stream_id).await;

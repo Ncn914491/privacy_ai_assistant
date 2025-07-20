@@ -30,7 +30,7 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
   const [recordingState, setRecordingState] = useState<'idle' | 'starting' | 'recording' | 'stopping' | 'processing' | 'complete' | 'error'>('idle');
-  const [isProcessing, setIsProcessing] = useState(false);
+  // Removed isProcessing - now using Vosk directly
 
   // MediaRecorder refs and state
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -91,7 +91,7 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
       setError(null);
       setRecordingTime(0);
       setAudioLevel(0);
-      setIsProcessing(false);
+      // Removed setIsProcessing - now using Vosk directly
 
       // Clear audio chunks
       audioChunksRef.current = [];
@@ -166,8 +166,8 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
 
       // Handle recording stop event
       mediaRecorder.onstop = async () => {
-        console.log('⏹️ MediaRecorder stopped, processing audio...');
-        await processRecordedAudio();
+        console.log('⏹️ MediaRecorder stopped, using Vosk for transcription...');
+        await processWithVosk();
       };
 
       // Start recording
@@ -198,6 +198,39 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
+    }
+  };
+
+  // 🎤 Process with Vosk STT
+  const processWithVosk = async () => {
+    try {
+      console.log('🎤 Starting Vosk transcription...');
+      setRecordingState('processing');
+      setPartialTranscription('🔄 Processing with Vosk...');
+
+      // Use the new Vosk command with 5 second duration
+      const result = await invoke<SttResult>('vosk_transcribe', { duration: 5.0 });
+
+      console.log('📝 Vosk result:', result);
+
+      if (result.success && result.text.trim()) {
+        console.log('✅ Vosk transcription successful:', result.text);
+        setTranscription(result.text);
+        setRecordingState('complete');
+        setPartialTranscription('');
+
+        // Notify parent component
+        onTranscriptionComplete?.(result.text);
+      } else {
+        console.warn('⚠️ Vosk transcription failed or empty');
+        setError('No speech detected. Please try again.');
+        setRecordingState('error');
+      }
+
+    } catch (error) {
+      console.error('❌ Vosk transcription error:', error);
+      setError(`Transcription failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setRecordingState('error');
     }
   };
 
@@ -244,78 +277,7 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
     }
   };
 
-  const processRecordedAudio = async () => {
-    // Prevent multiple simultaneous processing calls
-    if (isProcessing) {
-      console.log('⚠️ Audio processing already in progress, skipping...');
-      return;
-    }
-
-    try {
-      setIsProcessing(true);
-      setRecordingState('processing');
-      setPartialTranscription('🔄 Processing recorded audio...');
-
-      console.log('📊 Processing', audioChunksRef.current.length, 'audio chunks');
-
-      if (audioChunksRef.current.length === 0) {
-        throw new Error('No audio data recorded. Please try again.');
-      }
-
-      // Create blob from recorded chunks with the same MIME type used for recording
-      const audioBlob = new Blob(audioChunksRef.current);
-      console.log('📦 Created audio blob:', audioBlob.size, 'bytes, type:', audioBlob.type);
-
-      if (audioBlob.size === 0) {
-        throw new Error('Audio recording is empty. Please ensure your microphone is working and try again.');
-      }
-
-      // Convert blob to base64 for Tauri (handle large files safely)
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-
-      // Convert to base64 safely without spreading large arrays
-      let binaryString = '';
-      const chunkSize = 8192; // Process in chunks to avoid stack overflow
-
-      for (let i = 0; i < uint8Array.length; i += chunkSize) {
-        const chunk = uint8Array.slice(i, i + chunkSize);
-        binaryString += String.fromCharCode.apply(null, Array.from(chunk));
-      }
-
-      const base64Data = btoa(binaryString);
-
-      console.log('🔄 Converting audio to base64 for backend processing...');
-      setPartialTranscription('🎯 Running speech recognition...');
-
-      // Call the STT backend with the audio data directly
-      const result = await invoke<SttResult>('process_audio_data', {
-        audioData: base64Data,
-        mimeType: audioBlob.type || 'audio/webm'
-      });
-
-      console.log('🎯 STT result:', result);
-
-      if (result.success && result.text && result.text.trim().length > 0) {
-        setTranscription(result.text.trim());
-        setPartialTranscription('');
-        setRecordingState('complete');
-        console.log('✅ Transcription completed:', result.text);
-      } else {
-        throw new Error(result.text || 'Speech recognition returned empty result. Please speak more clearly and try again.');
-      }
-
-    } catch (error) {
-      console.error('❌ Audio processing error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to process recorded audio');
-      setPartialTranscription('');
-      setRecordingState('error');
-    } finally {
-      // Clean up audio chunks and reset processing flag
-      audioChunksRef.current = [];
-      setIsProcessing(false);
-    }
-  };
+  // Removed processRecordedAudio - now using Vosk directly
 
   const handleUse = () => {
     if (transcription.trim()) {

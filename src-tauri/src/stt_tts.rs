@@ -11,6 +11,7 @@ use std::time::Duration;
 use tauri::command;
 use log::{info, error, warn};
 use serde::{Serialize, Deserialize};
+use serde_json;
 
 const RECORDING_DURATION: u64 = 5; // seconds
 const SAMPLE_RATE: u32 = 16000; // 16kHz for speech recognition
@@ -1118,4 +1119,145 @@ pub async fn test_path_escaping(test_path: String) -> Result<String, String> {
     info!("🧪 Path test result: {}", result);
 
     Ok(format!("Original: {} | Escaped: {} | Test: {}", test_path, escaped, result))
+}
+
+// 🎤 Vosk Real-time STT Command
+#[tauri::command]
+pub async fn vosk_transcribe(duration: f64) -> Result<SttResult, String> {
+    info!("🎤 Starting Vosk transcription for {} seconds", duration);
+
+    // Get the project root directory (parent of src-tauri)
+    let current_dir = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+    // If we're in src-tauri, go up one level to project root
+    let project_root = if current_dir.file_name().and_then(|n| n.to_str()) == Some("src-tauri") {
+        current_dir.parent().unwrap_or(&current_dir).to_path_buf()
+    } else {
+        current_dir.clone()
+    };
+
+    info!("📁 Project root directory: {:?}", project_root);
+
+    // Path to the Vosk integration script (in project root)
+    let script_path = project_root.join("tauri_vosk_integration.py");
+
+    if !script_path.exists() {
+        return Err(format!("Vosk integration script not found: {:?}", script_path));
+    }
+
+    // Path to Vosk model (in project root)
+    let model_path = project_root.join("vosk-model-small-en-us-0.15");
+
+    if !model_path.exists() {
+        return Err(format!("Vosk model not found: {:?}", model_path));
+    }
+
+    info!("🐍 Running Vosk script: {:?}", script_path);
+    info!("🎤 Using Vosk model: {:?}", model_path);
+
+    // Run the Python script with absolute paths
+    let output = Command::new("python")
+        .arg(&script_path)
+        .arg(&model_path)
+        .arg(duration.to_string())
+        .current_dir(&project_root)
+        .output()
+        .map_err(|e| format!("Failed to run Vosk script: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        error!("❌ Vosk script failed: {}", stderr);
+        return Err(format!("Vosk script failed: {}", stderr));
+    }
+
+    // Parse the JSON output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    info!("📤 Vosk script output: {}", stdout);
+
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse Vosk output: {}", e))?;
+
+    if result["success"].as_bool().unwrap_or(false) {
+        let transcript = result["transcript"].as_str().unwrap_or("").to_string();
+        info!("✅ Vosk transcription successful: {}", transcript);
+
+        Ok(SttResult {
+            text: transcript,
+            confidence: 1.0, // Vosk doesn't provide confidence scores
+            success: true,
+        })
+    } else {
+        let error = result["error"].as_str().unwrap_or("Unknown error").to_string();
+        warn!("⚠️ Vosk transcription failed: {}", error);
+
+        Ok(SttResult {
+            text: String::new(),
+            confidence: 0.0,
+            success: false,
+        })
+    }
+}
+
+// 🧪 Test Vosk Installation
+#[tauri::command]
+pub async fn test_vosk_installation() -> Result<String, String> {
+    info!("🧪 Testing Vosk installation");
+
+    // Get the project root directory (parent of src-tauri)
+    let current_dir = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+    let project_root = if current_dir.file_name().and_then(|n| n.to_str()) == Some("src-tauri") {
+        current_dir.parent().unwrap_or(&current_dir).to_path_buf()
+    } else {
+        current_dir.clone()
+    };
+
+    info!("📁 Testing from project root: {:?}", project_root);
+
+    // Check if Python is available
+    let python_check = Command::new("python")
+        .arg("--version")
+        .output();
+
+    match python_check {
+        Ok(output) => {
+            let version = String::from_utf8_lossy(&output.stdout);
+            info!("🐍 Python version: {}", version);
+        }
+        Err(e) => {
+            return Err(format!("Python not found: {}", e));
+        }
+    }
+
+    // Check if Vosk model exists (in project root)
+    let model_path = project_root.join("vosk-model-small-en-us-0.15");
+    if !model_path.exists() {
+        return Err(format!("Vosk model not found: {:?}", model_path));
+    }
+
+    // Check if integration script exists (in project root)
+    let script_path = project_root.join("tauri_vosk_integration.py");
+    if !script_path.exists() {
+        return Err(format!("Vosk integration script not found: {:?}", script_path));
+    }
+
+    // Test Vosk import
+    let vosk_test = Command::new("python")
+        .arg("-c")
+        .arg("import vosk; import sounddevice; import numpy; print('Vosk dependencies OK')")
+        .current_dir(&project_root)
+        .output()
+        .map_err(|e| format!("Failed to test Vosk dependencies: {}", e))?;
+
+    if !vosk_test.status.success() {
+        let stderr = String::from_utf8_lossy(&vosk_test.stderr);
+        return Err(format!("Vosk dependencies test failed: {}", stderr));
+    }
+
+    let test_output = String::from_utf8_lossy(&vosk_test.stdout);
+    info!("✅ Vosk installation test: {}", test_output);
+
+    Ok(format!("Vosk installation OK: {}", test_output.trim()))
 }

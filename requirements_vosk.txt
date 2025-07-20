@@ -1,0 +1,14 @@
+# 🎤 Vosk Real-time STT Requirements
+# Install with: pip install -r requirements_vosk.txt
+
+vosk>=0.3.45
+sounddevice>=0.4.6
+numpy>=1.21.0
+wave  # Built-in Python module
+
+# Alternative audio libraries (optional)
+# pyaudio>=0.2.11  # Uncomment if you prefer PyAudio over sounddevice
+
+# For advanced audio processing (optional)
+# scipy>=1.7.0
+# librosa>=0.9.0
