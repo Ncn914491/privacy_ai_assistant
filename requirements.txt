@@ -1,0 +1,24 @@
+# Privacy AI Assistant - Python Backend Requirements
+
+# Core web framework
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# WebSocket support
+websockets>=11.0
+
+# Audio processing
+sounddevice>=0.4.0
+numpy>=1.20.0
+
+# Speech recognition
+vosk>=0.3.40
+
+# HTTP client for Ollama
+requests>=2.28.0
+
+# Data validation
+pydantic>=2.0.0
+
+# System monitoring and hardware detection
+psutil>=5.9.0

@@ -1,0 +1,15 @@
+{
+  "id": "chat_38eab2a0473c",
+  "title": "Test Chat",
+  "messages": [],
+  "created_at": "2025-07-22T14:19:09.195964+00:00",
+  "updated_at": "2025-07-22T14:19:09.196037+00:00",
+  "metadata": {
+    "model": "gemma3n:latest",
+    "token_count": 0,
+    "message_count": 0,
+    "last_activity": "2025-07-22T14:19:09.196020+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

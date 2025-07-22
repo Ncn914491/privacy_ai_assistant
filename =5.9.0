@@ -1,0 +1,6 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting psutil
+  Downloading psutil-7.0.0-cp37-abi3-win_amd64.whl.metadata (23 kB)
+Downloading psutil-7.0.0-cp37-abi3-win_amd64.whl (244 kB)
+Installing collected packages: psutil
+Successfully installed psutil-7.0.0
