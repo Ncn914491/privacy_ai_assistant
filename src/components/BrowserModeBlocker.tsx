@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Monitor, Terminal, ExternalLink } from 'lucide-react';
-import { getTauriStatus } from '@/utils/tauriDetection';
+import { getTauriStatus } from '../utils/tauriDetection';
 
 interface BrowserModeBlockerProps {
   onIgnoreWarning?: () => void;

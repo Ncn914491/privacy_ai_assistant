@@ -59,6 +59,23 @@ fn main() {
             send_llm_request_to_backend,
             get_ollama_models_from_backend,
 
+            // Chat session management commands
+            create_chat_session,
+            list_chat_sessions,
+            get_chat_session,
+            rename_chat_session,
+            delete_chat_session,
+            add_message_to_chat,
+            get_chat_context,
+
+            // Hardware detection commands
+            get_hardware_info,
+            get_runtime_config,
+            refresh_hardware_detection,
+
+            // Context-aware LLM commands
+            generate_chat_llm_response,
+
             // STT/TTS commands
             run_vosk_stt,
             run_piper_tts,

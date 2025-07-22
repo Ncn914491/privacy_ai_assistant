@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Mic } from 'lucide-react';
-import { useChatStore } from '@/stores/chatStore';
-import { cn } from '@/utils/cn';
+import { useChatStore } from '../stores/chatStore';
+import { cn } from '../utils/cn';
 import VoiceRecordingModal from './VoiceRecordingModal';
 
 interface InputAreaProps {

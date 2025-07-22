@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
-import { cn } from '@/utils/cn';
-import { ModelHealthStatus, modelHealthChecker } from '@/utils/modelHealth';
+import { cn } from '../utils/cn';
+import { ModelHealthStatus, modelHealthChecker } from '../utils/modelHealth';
 
 interface ModelStatusBadgeProps {
   status: ModelHealthStatus;

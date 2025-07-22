@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
-import { cn } from '@/utils/cn';
-import { modelHealthChecker } from '@/utils/modelHealth';
+import { cn } from '../utils/cn';
+import { modelHealthChecker } from '../utils/modelHealth';
 import { invoke } from '@tauri-apps/api/core';
 
 interface StartupVerificationProps {

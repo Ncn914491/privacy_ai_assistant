@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Mic, MicOff, Square, AlertCircle, CheckCircle, Loader2, Wifi, WifiOff } from 'lucide-react';
-import { cn } from '@/utils/cn';
+import { X, Mic, Square, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { cn } from '../utils/cn';
 import { useRealtimeSTT } from '../hooks/useRealtimeSTT';
 import { usePythonBackendLLM } from '../hooks/usePythonBackendLLM';
 
@@ -27,6 +27,8 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     partialText,
     finalText,
     error: sttError,
+    micPermission,
+    requestMicPermission,
     startRecording,
     stopRecording,
     clearResults
@@ -70,16 +72,19 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
 
   // Auto-trigger LLM when final transcription is available
   useEffect(() => {
-    if (finalText && finalText.trim().length > 0 && !isRecording && showFinalTranscription) {
-      console.log('🎤 Auto-triggering LLM with final transcription:', finalText);
+    if (finalText && finalText.trim().length > 0 && !isRecording) {
+      console.log('🎤 Final transcription received:', finalText);
+      setShowFinalTranscription(true);
+
       // Auto-trigger after a short delay to allow UI to update
       const timer = setTimeout(() => {
+        console.log('🎤 Auto-triggering LLM with final transcription:', finalText);
         handleUseTranscription();
-      }, 1000);
+      }, 1500);
 
       return () => clearTimeout(timer);
     }
-  }, [finalText, isRecording, showFinalTranscription]);
+  }, [finalText, isRecording]);
 
   // Handle modal close
   const handleClose = () => {
@@ -91,11 +96,22 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     onClose();
   };
 
+  // Request microphone permission
+  const handleRequestMicPermission = async () => {
+    try {
+      await requestMicPermission();
+    } catch (error) {
+      console.error('❌ Failed to request microphone permission:', error);
+    }
+  };
+
   // Start recording
   const handleStartRecording = async () => {
     try {
       clearResults();
       setShowFinalTranscription(false);
+
+      // The startRecording function will handle permission checks internally
       await startRecording();
     } catch (error) {
       console.error('❌ Failed to start recording:', error);
@@ -139,6 +155,8 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
     if (!backendHealth) return { icon: WifiOff, text: 'Backend not connected', color: 'text-red-500' };
     if (!backendHealth.vosk_initialized) return { icon: AlertCircle, text: 'STT not initialized', color: 'text-yellow-500' };
     if (!isConnected) return { icon: WifiOff, text: 'WebSocket disconnected', color: 'text-red-500' };
+    if (micPermission === 'denied') return { icon: AlertCircle, text: 'Microphone access denied', color: 'text-red-500' };
+    if (micPermission === 'prompt') return { icon: AlertCircle, text: 'Microphone permission needed', color: 'text-yellow-500' };
     return { icon: Wifi, text: 'Connected', color: 'text-green-500' };
   };
 
@@ -179,15 +197,52 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
             )}
           </div>
 
+          {/* Microphone Permission */}
+          {micPermission === 'denied' && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center gap-2 text-red-600 mb-2">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm font-medium">Microphone access denied</span>
+              </div>
+              <div className="text-red-700 text-sm mb-3">
+                Please enable microphone access in your browser settings to use voice input.
+              </div>
+              <button
+                onClick={handleRequestMicPermission}
+                className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
+              >
+                Request Permission
+              </button>
+            </div>
+          )}
+
+          {micPermission === 'prompt' && (
+            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center gap-2 text-yellow-600 mb-2">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm font-medium">Microphone permission needed</span>
+              </div>
+              <div className="text-yellow-700 text-sm mb-3">
+                Click below to request microphone access for voice input.
+              </div>
+              <button
+                onClick={handleRequestMicPermission}
+                className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600"
+              >
+                Request Permission
+              </button>
+            </div>
+          )}
+
           {/* Recording Controls */}
           <div className="text-center mb-6">
             {!isRecording ? (
               <button
                 onClick={handleStartRecording}
-                disabled={!isConnected || !backendHealth?.vosk_initialized}
+                disabled={!isConnected || !backendHealth?.vosk_initialized || micPermission !== 'granted'}
                 className={cn(
                   "w-20 h-20 rounded-full flex items-center justify-center transition-all duration-200",
-                  isConnected && backendHealth?.vosk_initialized
+                  isConnected && backendHealth?.vosk_initialized && micPermission === 'granted'
                     ? "bg-red-500 hover:bg-red-600 text-white shadow-lg hover:shadow-xl"
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
                 )}
@@ -210,9 +265,13 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
                 </div>
               ) : (
                 <div className="text-gray-600">
-                  {isConnected && backendHealth?.vosk_initialized 
-                    ? "Click to start recording" 
-                    : "Waiting for connection..."}
+                  {!isConnected || !backendHealth?.vosk_initialized
+                    ? "Waiting for connection..."
+                    : micPermission === 'denied'
+                    ? "Microphone access denied"
+                    : micPermission === 'prompt'
+                    ? "Microphone permission needed"
+                    : "Click to start recording"}
                 </div>
               )}
             </div>
@@ -244,6 +303,24 @@ export const RealtimeVoiceModal: React.FC<RealtimeVoiceModalProps> = ({
                   <span className="text-sm font-medium">Error:</span>
                 </div>
                 <div className="text-red-800 text-sm mt-1">{sttError}</div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={clearResults}
+                    className="px-3 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
+                  >
+                    Clear Error
+                  </button>
+                  {!isConnected && (
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="px-3 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600"
+                    >
+                      Refresh Page
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

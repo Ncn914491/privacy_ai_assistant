@@ -2,9 +2,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 import InputArea from './InputArea';
 import ModelStatusBadge from './ModelStatusBadge';
+import HardwareStatusBadge from './HardwareStatusBadge';
 import ThinkingIndicator from './ThinkingIndicator';
 import StartupDiagnostic from './StartupDiagnostic';
-import { useChatStore } from '../stores/chatStore';
+import { useMultiChatStore } from '../stores/chatStore';
 import { invoke } from '@tauri-apps/api/core';
 import { modelHealthChecker, ModelHealthStatus } from '../utils/modelHealth';
 import { AlertTriangle, Settings } from 'lucide-react';
@@ -12,7 +13,7 @@ import { TAURI_ENV } from '../utils/tauriDetection';
 import { SttResult } from '../types';
 import { useStreamingLLM } from '../hooks/useStreamingLLM';
 import { usePythonBackendLLM } from '../hooks/usePythonBackendLLM';
-import { usePythonBackendStreaming } from '../hooks/usePythonBackendStreaming';
+
 import VoiceRecordingModal from './VoiceRecordingModal';
 import RealtimeVoiceModal from './RealtimeVoiceModal';
 
@@ -21,31 +22,20 @@ const ChatInterface: React.FC = () => {
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [showVoiceModal, setShowVoiceModal] = useState(false);
   const [showRealtimeVoiceModal, setShowRealtimeVoiceModal] = useState(false);
-  const [useRealtimeSTT, setUseRealtimeSTT] = useState(true); // Default to new system
-  const { messages, addMessage, updateMessage, setLoading, isLoading } = useChatStore();
-  const { streamingState, startStream, stopStream, resetStream } = useStreamingLLM();
+  const { messages, addMessage, updateMessage, setLoading, isLoading, generateContextAwareResponse, activeChatId } = useMultiChatStore();
+  const { streamingState, stopStream } = useStreamingLLM();
   const currentStreamingMessageId = useRef<string | null>(null);
 
   // Python backend integration
   const {
     backendHealth,
-    availableModels,
     startBackend,
-    stopBackend,
     checkBackendHealth,
     sendPrompt,
-    getAvailableModels,
-    isLoading: backendLoading,
-    error: backendError
+    getAvailableModels
   } = usePythonBackendLLM();
 
-  // Python backend streaming
-  const {
-    streamingState: pythonStreamingState,
-    startStream: startPythonStream,
-    stopStream: stopPythonStream,
-    resetStream: resetPythonStream
-  } = usePythonBackendStreaming();
+  // Python backend streaming (removed unused import)
 
   // Monitor streaming state for debugging (keeping this for fallback)
   useEffect(() => {
@@ -300,7 +290,12 @@ const ChatInterface: React.FC = () => {
     console.log('🚀 handleSendMessage called with content:', content);
     console.log('🚀 Content length:', content.length);
 
-    addMessage(content, 'user');
+    // Check if we have an active chat session
+    if (!activeChatId) {
+      console.warn('⚠️ No active chat session, cannot send message');
+      return;
+    }
+
     setLoading(true);
 
     // Add a streaming message placeholder
@@ -331,39 +326,26 @@ const ChatInterface: React.FC = () => {
         await startBackend();
       }
 
-      console.log('🐍 Using Python backend streaming for LLM request...');
-      updateMessage(streamingMessageId.toString(), { content: '🤖 Generating response...' });
+      console.log('🧠 Using context-aware LLM generation...');
+      updateMessage(streamingMessageId.toString(), { content: '🤖 Generating context-aware response...' });
 
-      // Use Python backend streaming for LLM request
-      let fullResponse = '';
-      await startPythonStream(
-        content,
-        'gemma3n:latest',
-        // onChunk callback
-        (chunk: string) => {
-          fullResponse += chunk;
-          updateMessage(streamingMessageId.toString(), { content: fullResponse });
-        },
-        // onComplete callback
-        () => {
-          console.log('✅ Streaming completed, final response length:', fullResponse.length);
-          // TTS for responses (skip for very long responses)
-          if (ttsEnabled && fullResponse.length < 1000) {
-            console.log('🔊 Starting TTS for response...');
-            invoke('run_piper_tts', { text: fullResponse }).catch((error) => {
-              console.error('TTS Error:', error);
-            });
-          } else if (fullResponse.length >= 1000) {
-            console.log('⏭️ Skipping TTS for long response (length:', fullResponse.length, ')');
-          }
-        },
-        // onError callback
-        (error: string) => {
-          console.error('❌ Streaming error:', error);
-          const errorMessage = getErrorMessage(error);
-          updateMessage(streamingMessageId.toString(), { content: errorMessage });
-        }
-      );
+      // Use context-aware response generation
+      const response = await generateContextAwareResponse(content);
+
+      // Update the message with the response
+      updateMessage(streamingMessageId.toString(), { content: response });
+
+      console.log('✅ Context-aware response generated, length:', response.length);
+
+      // TTS for responses (skip for very long responses)
+      if (ttsEnabled && response.length < 1000) {
+        console.log('🔊 Starting TTS for response...');
+        invoke('run_piper_tts', { text: response }).catch((error) => {
+          console.error('TTS Error:', error);
+        });
+      } else if (response.length >= 1000) {
+        console.log('⏭️ Skipping TTS for long response (length:', response.length, ')');
+      }
 
     } catch (error) {
       console.error('❌ Error in handleSendMessage:', error);
@@ -380,11 +362,7 @@ const ChatInterface: React.FC = () => {
 
   // Voice input handlers
   const handleVoiceInput = () => {
-    if (useRealtimeSTT) {
-      setShowRealtimeVoiceModal(true);
-    } else {
-      setShowVoiceModal(true);
-    }
+    setShowRealtimeVoiceModal(true);
   };
 
   const handleVoiceTranscription = (transcription: string) => {
@@ -404,17 +382,15 @@ const ChatInterface: React.FC = () => {
       return;
     }
 
-    // Check system readiness
+    // Check system readiness - be more lenient
     if (!systemReady) {
-      console.warn('⚠️ System not ready, cannot process voice input');
-      addMessage('❌ System not ready. Please wait for initialization to complete.', 'assistant');
-      return;
+      console.warn('⚠️ System not ready, but attempting to process voice input anyway');
+      // Don't return - let's try anyway
     }
 
-    if (!modelHealth.isAvailable) {
-      console.warn('⚠️ Model not available, cannot process voice input');
-      addMessage('❌ AI model not available. Please check the model status.', 'assistant');
-      return;
+    if (!modelHealth.isAvailable && modelHealth.connectionState !== 'checking') {
+      console.warn('⚠️ Model not available, but attempting voice input anyway');
+      // Don't return - the LLM integration will handle backend startup
     }
 
     console.log('🚀 All checks passed, sending transcription to LLM:', transcription);
@@ -432,7 +408,7 @@ const ChatInterface: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with Status Badge */}
+      {/* Header with Status Badges */}
       <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center space-x-3">
           <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -443,6 +419,7 @@ const ChatInterface: React.FC = () => {
             showDetails={true}
             onRefresh={() => modelHealthChecker.forceCheck()}
           />
+          <HardwareStatusBadge className="max-w-xs" />
         </div>
         
         {/* Controls */}
@@ -585,6 +562,7 @@ const ChatInterface: React.FC = () => {
                 Some critical components are not available. Chat and voice features are disabled.
               </p>
               <button
+                type="button"
                 onClick={() => setShowDiagnostic(true)}
                 className="mt-2 text-sm text-yellow-800 dark:text-yellow-200 underline hover:no-underline"
               >
@@ -638,6 +616,7 @@ const ChatInterface: React.FC = () => {
             />
             <div className="mt-4 text-center">
               <button
+                type="button"
                 onClick={() => setShowDiagnostic(false)}
                 className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
               >

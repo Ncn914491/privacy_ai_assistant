@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, AlertCircle, Loader2, RefreshCw, Settings } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { cn } from '@/utils/cn';
+import { cn } from '../utils/cn';
 
 interface DiagnosticStep {
   id: string;

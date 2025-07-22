@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, WifiOff, Brain, Mic, Volume2, AlertTriangle, CheckCircle } from 'lucide-react';
-import { cn } from '@/utils/cn';
-import { ModelHealthStatus } from '@/utils/modelHealth';
+import { cn } from '../utils/cn';
+import { ModelHealthStatus } from '../utils/modelHealth';
 
 interface StatusBarProps {
   modelHealth: ModelHealthStatus;

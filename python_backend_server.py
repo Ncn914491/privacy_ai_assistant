@@ -29,10 +29,34 @@ import numpy as np
 import sounddevice as sd
 import vosk
 import requests
+import os
+import base64
+import tempfile
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+
+from stt.stt import STT # Import the new STT class
+from chat_sessions import (
+    session_manager,
+    ChatSession,
+    ChatMessage,
+    ChatSessionSummary,
+    CreateChatRequest,
+    CreateChatResponse,
+    RenameChatRequest,
+    AddMessageRequest,
+    ChatListResponse,
+    ChatSessionResponse
+)
+from hardware_detection import (
+    get_runtime_config,
+    get_hardware_summary,
+    hardware_detector,
+    RuntimeConfig,
+    HardwareInfo
+)
 
 # 🔧 Configuration
 SAMPLE_RATE = 16000
@@ -54,8 +78,43 @@ DEFAULT_MODEL = "gemma3n:latest"  # Standardized model name
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FastAPI app
-app = FastAPI(title="Privacy AI Assistant Backend", version="1.0.0")
+# Lifespan context manager
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan."""
+    # Startup
+    logger.info("🚀 Starting Privacy AI Assistant Backend...")
+    
+    if not initialize_vosk():
+        logger.error("❌ Failed to initialize Vosk - STT will not work")
+    
+    # Test Ollama connection
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+        if response.status_code == 200:
+            models = response.json().get('models', [])
+            model_names = [model['name'] for model in models]
+            logger.info(f"✅ Ollama connected. Available models: {model_names}")
+            
+            # Check if our default model is available
+            if any(DEFAULT_MODEL in name for name in model_names):
+                logger.info(f"✅ Default model {DEFAULT_MODEL} is available")
+            else:
+                logger.warning(f"⚠️ Default model {DEFAULT_MODEL} not found. Available: {model_names}")
+        else:
+            logger.error(f"❌ Ollama API returned status {response.status_code}")
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to Ollama: {e}")
+    
+    yield  # This separates startup from shutdown
+    
+    # Shutdown
+    logger.info("🙏 Shutting down Privacy AI Assistant Backend...")
+
+# FastAPI app with lifespan
+app = FastAPI(title="Privacy AI Assistant Backend", version="1.0.0", lifespan=lifespan)
 
 # CORS middleware for Tauri frontend
 app.add_middleware(
@@ -71,6 +130,11 @@ class STTRequest(BaseModel):
     audio_data: str  # Base64 encoded audio
     format: str = "webm"
 
+class STTResponse(BaseModel):
+    text: str
+    success: bool
+    error: Optional[str] = None
+
 class LLMRequest(BaseModel):
     prompt: str
     model: str = DEFAULT_MODEL
@@ -82,23 +146,22 @@ class LLMResponse(BaseModel):
     success: bool
     error: Optional[str] = None
 
-# Global Vosk instance
-vosk_model = None
-vosk_recognizer = None
+# Global STT instance
+stt_processor: Optional[STT] = None
 
 def initialize_vosk():
     """Initialize Vosk model and recognizer."""
-    global vosk_model, vosk_recognizer
+    global stt_processor
     
     try:
-        if not Path(VOSK_MODEL_PATH).exists():
-            logger.error(f"❌ Vosk model not found: {VOSK_MODEL_PATH}")
+        model_path = Path("models/vosk/vosk-model-small-en-us-0.15")
+        if not model_path.exists():
+            logger.error(f"❌ Vosk model not found: {model_path}")
             return False
         
-        logger.info(f"🔧 Initializing Vosk model: {VOSK_MODEL_PATH}")
+        logger.info(f"🔧 Initializing Vosk model: {model_path}")
         vosk.SetLogLevel(-1)
-        vosk_model = vosk.Model(VOSK_MODEL_PATH)
-        vosk_recognizer = vosk.KaldiRecognizer(vosk_model, SAMPLE_RATE)
+        stt_processor = STT(str(model_path))
         
         logger.info("✅ Vosk initialized successfully")
         return True
@@ -115,12 +178,19 @@ class RealtimeSTT:
         self.recognizer = None
         self.websocket = None
         self.debug_audio_data = []
+        self.loop = None
         
-    def start_recording(self, websocket: WebSocket):
+    def start_recording(self, websocket: WebSocket, loop: asyncio.AbstractEventLoop):
         """Start real-time recording and processing."""
+        global stt_processor
+        if not stt_processor:
+            logger.error("Vosk STT processor not initialized, cannot start real-time STT.")
+            return
+
         self.websocket = websocket
+        self.loop = loop
         self.is_recording = True
-        self.recognizer = vosk.KaldiRecognizer(vosk_model, SAMPLE_RATE)
+        self.recognizer = vosk.KaldiRecognizer(stt_processor.model, SAMPLE_RATE) # Use the model from stt_processor
         self.debug_audio_data = []
         
         # Start audio capture thread
@@ -190,17 +260,29 @@ class RealtimeSTT:
                     # Final result
                     result = json.loads(self.recognizer.Result())
                     if result.get('text', '').strip():
-                        asyncio.create_task(self._send_result('final', result['text']))
+                        self._send_result_threadsafe('final', result['text'])
                 else:
                     # Partial result
                     partial = json.loads(self.recognizer.PartialResult())
                     if partial.get('partial', '').strip():
-                        asyncio.create_task(self._send_result('partial', partial['partial']))
+                        self._send_result_threadsafe('partial', partial['partial'])
                 
             except queue.Empty:
                 continue
             except Exception as e:
                 logger.error(f"❌ Processing error: {e}")
+
+    def _send_result_threadsafe(self, result_type: str, text: str):
+        """Send result to WebSocket client in a thread-safe manner."""
+        if self.loop and self.websocket:
+            future = asyncio.run_coroutine_threadsafe(
+                self._send_result(result_type, text),
+                self.loop
+            )
+            try:
+                future.result(timeout=2)  # Wait for the result
+            except Exception as e:
+                logger.error(f"❌ Error sending WebSocket message from thread: {e}")
     
     async def _send_result(self, result_type: str, text: str):
         """Send result to WebSocket client."""
@@ -237,38 +319,13 @@ class RealtimeSTT:
 # Global STT instance
 realtime_stt = RealtimeSTT()
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
-    logger.info("🚀 Starting Privacy AI Assistant Backend...")
-    
-    if not initialize_vosk():
-        logger.error("❌ Failed to initialize Vosk - STT will not work")
-    
-    # Test Ollama connection
-    try:
-        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
-        if response.status_code == 200:
-            models = response.json().get('models', [])
-            model_names = [model['name'] for model in models]
-            logger.info(f"✅ Ollama connected. Available models: {model_names}")
-            
-            # Check if our default model is available
-            if any(DEFAULT_MODEL in name for name in model_names):
-                logger.info(f"✅ Default model {DEFAULT_MODEL} is available")
-            else:
-                logger.warning(f"⚠️ Default model {DEFAULT_MODEL} not found. Available: {model_names}")
-        else:
-            logger.error(f"❌ Ollama API returned status {response.status_code}")
-    except Exception as e:
-        logger.error(f"❌ Failed to connect to Ollama: {e}")
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
-        "vosk_initialized": vosk_model is not None,
+        "vosk_initialized": stt_processor is not None,
         "timestamp": time.time()
     }
 
@@ -284,9 +341,52 @@ async def get_ollama_models():
     except requests.RequestException as e:
         raise HTTPException(status_code=503, detail=f"Cannot connect to Ollama: {e}")
 
+@app.post("/stt/transcribe", response_model=STTResponse)
+async def transcribe_audio_file(request: STTRequest):
+    """Transcribe an audio file using Vosk."""
+    if not stt_processor:
+        logger.error("Vosk STT processor not initialized, cannot transcribe.")
+        return STTResponse(text="", success=False, error="Vosk STT processor not initialized")
+
+    try:
+        # Decode base64 audio data and save temporarily for STT.transcribe
+        audio_bytes = base64.b64decode(request.audio_data)
+        temp_audio_path = DEBUG_AUDIO_DIR / f"temp_upload_{int(time.time())}.wav"
+        
+        with open(temp_audio_path, "wb") as f:
+            f.write(audio_bytes)
+
+        # Use the new STT class to transcribe
+        transcription_result = stt_processor.transcribe(str(temp_audio_path))
+        
+        # Clean up temporary file
+        os.remove(temp_audio_path)
+
+        if transcription_result["success"]:
+            transcript = transcription_result["text"]
+            logger.info(f"Transcription successful: {transcript}")
+            return STTResponse(text=transcript, success=True)
+        else:
+            logger.error(f"Transcription failed: {transcription_result['error']}")
+            return STTResponse(text="", success=False, error=transcription_result["error"])
+
+    except base64.binascii.Error:
+        logger.error("Invalid Base64 data received.")
+        raise HTTPException(status_code=400, detail="Invalid Base64 data")
+    except Exception as e:
+        logger.error(f"Unexpected error during file transcription: {e}", exc_info=True)
+        return STTResponse(text="", success=False, error=f"An unexpected error occurred: {e}")
+
+class ChatLLMRequest(BaseModel):
+    chat_id: str
+    prompt: str
+    model: str = DEFAULT_MODEL
+    stream: bool = False
+    system_prompt: Optional[str] = None
+
 @app.post("/llm/generate")
 async def generate_llm_response(request: LLMRequest) -> LLMResponse:
-    """Generate LLM response via Ollama."""
+    """Generate LLM response via Ollama (legacy endpoint)."""
     try:
         logger.info(f"🚀 LLM request: model={request.model}, prompt_length={len(request.prompt)}")
 
@@ -332,7 +432,114 @@ async def generate_llm_response(request: LLMRequest) -> LLMResponse:
                 success=False,
                 error=f"Ollama API error {response.status_code}: {error_text}"
             )
-    
+
+    except requests.RequestException as e:
+        logger.error(f"❌ Request to Ollama failed: {e}")
+        return LLMResponse(
+            response="",
+            model=request.model,
+            success=False,
+            error=f"Cannot connect to Ollama: {e}"
+        )
+    except Exception as e:
+        logger.error(f"❌ Unexpected error: {e}")
+        return LLMResponse(
+            response="",
+            model=request.model,
+            success=False,
+            error=f"Unexpected error: {e}"
+        )
+
+@app.post("/llm/chat-generate")
+async def generate_chat_llm_response(request: ChatLLMRequest) -> LLMResponse:
+    """Generate context-aware LLM response for a chat session."""
+    try:
+        logger.info(f"🚀 Chat LLM request: chat_id={request.chat_id}, model={request.model}")
+
+        # Get context for the chat session
+        context_data = session_manager.get_context_for_session(
+            request.chat_id,
+            request.system_prompt,
+            request.model
+        )
+
+        if not context_data:
+            return LLMResponse(
+                response="",
+                model=request.model,
+                success=False,
+                error=f"Chat session {request.chat_id} not found"
+            )
+
+        # Add the new user message to context
+        context_messages = context_data["messages"]
+        context_messages.append({
+            "role": "user",
+            "content": request.prompt
+        })
+
+        # Format messages for Ollama
+        formatted_prompt = ""
+        for msg in context_messages:
+            role = msg["role"]
+            content = msg["content"]
+            if role == "system":
+                formatted_prompt += f"System: {content}\n\n"
+            elif role == "user":
+                formatted_prompt += f"User: {content}\n\n"
+            elif role == "assistant":
+                formatted_prompt += f"Assistant: {content}\n\n"
+
+        formatted_prompt += "Assistant: "
+
+        logger.info(f"📝 Context: {len(context_messages)} messages, {context_data['total_tokens']} tokens ({context_data['token_utilization']:.1f}% utilization)")
+
+        # Prepare Ollama request
+        ollama_request = {
+            "model": request.model,
+            "prompt": formatted_prompt,
+            "stream": request.stream
+        }
+
+        # Send request to Ollama
+        response = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json=ollama_request,
+            timeout=120  # Longer timeout for context-aware generation
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            llm_response = result.get('response', '').strip()
+
+            if llm_response:
+                # Add the assistant's response to the chat session
+                session_manager.add_message(request.chat_id, llm_response, "assistant", request.model)
+
+                logger.info(f"✅ Chat LLM response generated (length: {len(llm_response)})")
+                return LLMResponse(
+                    response=llm_response,
+                    model=request.model,
+                    success=True
+                )
+            else:
+                logger.error("❌ Empty response from Ollama")
+                return LLMResponse(
+                    response="",
+                    model=request.model,
+                    success=False,
+                    error="Empty response from LLM"
+                )
+        else:
+            error_text = response.text()
+            logger.error(f"❌ Ollama API error {response.status_code}: {error_text}")
+            return LLMResponse(
+                response="",
+                model=request.model,
+                success=False,
+                error=f"Ollama API error {response.status_code}: {error_text}"
+            )
+
     except requests.RequestException as e:
         logger.error(f"❌ Request to Ollama failed: {e}")
         return LLMResponse(
@@ -437,30 +644,306 @@ async def websocket_stt_stream(websocket: WebSocket):
     """WebSocket endpoint for real-time STT streaming."""
     await websocket.accept()
     logger.info("🔌 STT WebSocket connected")
-    
+    loop = asyncio.get_event_loop()
+
     try:
-        # Start real-time STT
-        realtime_stt.start_recording(websocket)
-        
+        # Check if Vosk is initialized
+        if not stt_processor:
+            await websocket.send_json({
+                'type': 'error',
+                'message': 'Vosk not initialized'
+            })
+            logger.error("❌ Vosk instance not initialized for STT streaming")
+            return
+
+        # Initialize recognizer for this session
+        recognizer = vosk.KaldiRecognizer(stt_processor.model, SAMPLE_RATE)
+        logger.info("🎤 Started real-time STT session")
+
         # Keep connection alive and handle messages
         while True:
             try:
-                message = await websocket.receive_json()
-                
-                if message.get('action') == 'stop':
-                    logger.info("⏹️ Received stop command")
-                    break
-                    
+                # Try to receive binary data first
+                try:
+                    audio_data = await websocket.receive_bytes()
+                    logger.debug(f"📥 Received audio data: {len(audio_data)} bytes")
+
+                    try:
+                        # Process audio data with Vosk
+                        if recognizer.AcceptWaveform(audio_data):
+                            # Final result
+                            result = json.loads(recognizer.Result())
+                            if result.get('text', '').strip():
+                                await websocket.send_json({
+                                    'type': 'final',
+                                    'text': result['text'],
+                                    'timestamp': time.time()
+                                })
+                                logger.info(f"🎯 Final result: {result['text']}")
+                        else:
+                            # Partial result
+                            partial = json.loads(recognizer.PartialResult())
+                            if partial.get('partial', '').strip():
+                                await websocket.send_json({
+                                    'type': 'partial',
+                                    'text': partial['partial'],
+                                    'timestamp': time.time()
+                                })
+                    except Exception as vosk_error:
+                        logger.error(f"❌ Vosk processing error: {vosk_error}")
+                        await websocket.send_json({
+                            'type': 'error',
+                            'text': f'Speech processing error: {vosk_error}',
+                            'timestamp': time.time()
+                        })
+
+                except Exception:
+                    # If binary data fails, try JSON (for control messages)
+                    try:
+                        control_message = await websocket.receive_json()
+                        if control_message.get('action') == 'stop':
+                            logger.info("⏹️ Received stop command")
+                            break
+                    except Exception as json_error:
+                        logger.debug(f"❌ No valid message received: {json_error}")
+                        # Send a heartbeat to keep connection alive
+                        await websocket.send_json({
+                            'type': 'heartbeat',
+                            'timestamp': time.time()
+                        })
+                        await asyncio.sleep(0.1)
+
             except WebSocketDisconnect:
                 logger.info("🔌 STT WebSocket disconnected")
                 break
             except Exception as e:
                 logger.error(f"❌ WebSocket error: {e}")
                 break
-    
+
     finally:
-        realtime_stt.stop_recording()
         logger.info("🔌 STT WebSocket cleanup completed")
+
+# ===== CHAT SESSION ENDPOINTS =====
+
+@app.post("/chats/create", response_model=CreateChatResponse)
+async def create_chat_session(request: CreateChatRequest):
+    """Create a new chat session."""
+    try:
+        session = session_manager.create_session(request.title)
+        return CreateChatResponse(
+            chat_id=session.id,
+            title=session.title,
+            success=True
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to create chat session: {e}")
+        return CreateChatResponse(
+            chat_id="",
+            title="",
+            success=False,
+            error=str(e)
+        )
+
+@app.get("/chats/list", response_model=ChatListResponse)
+async def list_chat_sessions():
+    """List all chat sessions."""
+    try:
+        sessions = session_manager.list_sessions()
+        return ChatListResponse(
+            sessions=sessions,
+            success=True
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to list chat sessions: {e}")
+        return ChatListResponse(
+            sessions=[],
+            success=False,
+            error=str(e)
+        )
+
+@app.get("/chats/{chat_id}", response_model=ChatSessionResponse)
+async def get_chat_session(chat_id: str):
+    """Get a specific chat session."""
+    try:
+        session = session_manager.load_session(chat_id)
+        if session:
+            return ChatSessionResponse(
+                session=session,
+                success=True
+            )
+        else:
+            return ChatSessionResponse(
+                session=None,
+                success=False,
+                error=f"Chat session {chat_id} not found"
+            )
+    except Exception as e:
+        logger.error(f"❌ Failed to get chat session {chat_id}: {e}")
+        return ChatSessionResponse(
+            session=None,
+            success=False,
+            error=str(e)
+        )
+
+@app.post("/chats/{chat_id}/messages")
+async def add_message_to_chat(chat_id: str, request: AddMessageRequest):
+    """Add a message to a chat session."""
+    try:
+        message = session_manager.add_message(
+            chat_id,
+            request.content,
+            request.role,
+            request.model or "gemma3n:latest"
+        )
+        if message:
+            return {
+                "success": True,
+                "message": message.dict()
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Failed to add message to chat {chat_id}"
+            }
+    except Exception as e:
+        logger.error(f"❌ Failed to add message to chat {chat_id}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.put("/chats/{chat_id}/rename")
+async def rename_chat_session(chat_id: str, request: RenameChatRequest):
+    """Rename a chat session."""
+    try:
+        success = session_manager.rename_session(chat_id, request.new_title)
+        return {
+            "success": success,
+            "error": None if success else f"Failed to rename chat {chat_id}"
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to rename chat {chat_id}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.delete("/chats/{chat_id}")
+async def delete_chat_session(chat_id: str):
+    """Delete a chat session."""
+    try:
+        success = session_manager.delete_session(chat_id)
+        return {
+            "success": success,
+            "error": None if success else f"Failed to delete chat {chat_id}"
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to delete chat {chat_id}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.get("/chats/{chat_id}/context")
+async def get_chat_context(chat_id: str, system_prompt: Optional[str] = None, model: Optional[str] = None):
+    """Get token-aware context window for a chat session."""
+    try:
+        context_data = session_manager.get_context_for_session(
+            chat_id,
+            system_prompt,
+            model or "gemma3n:latest"
+        )
+        if context_data:
+            return {
+                "success": True,
+                **context_data
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Chat session {chat_id} not found"
+            }
+    except Exception as e:
+        logger.error(f"❌ Failed to get context for chat {chat_id}: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+# ===== HARDWARE DETECTION ENDPOINTS =====
+
+@app.get("/hardware/info")
+async def get_hardware_info():
+    """Get detailed hardware information."""
+    try:
+        summary = get_hardware_summary()
+        return {
+            "success": True,
+            "data": summary
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to get hardware info: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.get("/hardware/runtime-config")
+async def get_optimal_runtime_config():
+    """Get optimal runtime configuration for Ollama."""
+    try:
+        config = get_runtime_config()
+        return {
+            "success": True,
+            "config": {
+                "mode": config.mode.value,
+                "reason": config.reason,
+                "ollama_args": config.ollama_args,
+                "recommended_models": config.recommended_models,
+                "hardware_info": {
+                    "cpu_cores": config.hardware_info.cpu_cores,
+                    "ram_total_mb": config.hardware_info.ram_total,
+                    "ram_available_mb": config.hardware_info.ram_available,
+                    "has_gpu": config.hardware_info.has_gpu,
+                    "gpu_name": config.hardware_info.gpu_name,
+                    "vram_total_mb": config.hardware_info.vram_total,
+                    "vram_available_mb": config.hardware_info.vram_available,
+                    "platform": config.hardware_info.platform_info
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to get runtime config: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/hardware/refresh")
+async def refresh_hardware_detection():
+    """Refresh hardware detection (useful for hot-plugged GPUs)."""
+    try:
+        # Re-detect hardware
+        hardware_detector._detect_basic_info()
+        hardware_detector.detect_gpu()
+
+        # Get updated config
+        config = get_runtime_config()
+
+        return {
+            "success": True,
+            "message": "Hardware detection refreshed",
+            "config": {
+                "mode": config.mode.value,
+                "reason": config.reason
+            }
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to refresh hardware detection: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     uvicorn.run(

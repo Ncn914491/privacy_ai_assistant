@@ -19,3 +19,6 @@ requests>=2.28.0
 
 # Data validation
 pydantic>=2.0.0
+
+# System monitoring and hardware detection
+psutil>=5.9.0

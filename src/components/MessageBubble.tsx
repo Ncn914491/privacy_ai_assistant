@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Copy, Check, User, Bot } from 'lucide-react';
-import { Message } from '@/types';
-import { cn } from '@/utils/cn';
+import { Message } from '../types';
+import { cn } from '../utils/cn';
 
 interface MessageBubbleProps {
   message: Message;

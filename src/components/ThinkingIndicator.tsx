@@ -1,6 +1,6 @@
 import React from 'react';
 import { Brain, Loader2, Sparkles } from 'lucide-react';
-import { cn } from '@/utils/cn';
+import { cn } from '../utils/cn';
 
 interface ThinkingIndicatorProps {
   isVisible: boolean;

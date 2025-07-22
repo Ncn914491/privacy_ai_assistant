@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import ChatInterface from './components/ChatInterface';
 import BrowserModeBlocker from './components/BrowserModeBlocker';
 import StartupDiagnostic from './components/StartupDiagnostic'; // Import the diagnostic component
+import Sidebar from './components/Sidebar';
 import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
@@ -113,7 +114,14 @@ const App: React.FC = () => {
         );
 
       case 'ready':
-        return <ChatInterface />;
+        return (
+          <>
+            <Sidebar />
+            <div className="lg:ml-80">
+              <ChatInterface />
+            </div>
+          </>
+        );
 
       case 'browser_mode':
         return <BrowserModeBlocker onIgnoreWarning={() => setAppState('ready')} />;

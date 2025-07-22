@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Mic, MicOff, Square, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
-import { cn } from '@/utils/cn';
+import { cn } from '../utils/cn';
 import { invoke } from '@tauri-apps/api/core';
-import { TAURI_ENV } from '@/utils/tauriDetection';
+import { TAURI_ENV } from '../utils/tauriDetection';
 
 interface VoiceRecordingModalProps {
   isOpen: boolean;
@@ -208,19 +208,19 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
       setRecordingState('processing');
       setPartialTranscription('🔄 Processing with Vosk...');
 
-      // Use the new Vosk command with 5 second duration
-      const result = await invoke<SttResult>('vosk_transcribe', { duration: 5.0 });
+      // Use the Tauri STT command
+      const result = await invoke<SttResult>('run_vosk_stt', { mic_on: true });
 
       console.log('📝 Vosk result:', result);
 
-      if (result.success && result.text.trim()) {
+      if (result.success && result.text && result.text.trim().length > 0) {
         console.log('✅ Vosk transcription successful:', result.text);
         setTranscription(result.text);
         setRecordingState('complete');
         setPartialTranscription('');
 
-        // Notify parent component
-        onTranscriptionComplete?.(result.text);
+        // Notify parent component with clean text
+        onTranscriptionComplete?.(result.text.trim());
       } else {
         console.warn('⚠️ Vosk transcription failed or empty');
         setError('No speech detected. Please try again.');
