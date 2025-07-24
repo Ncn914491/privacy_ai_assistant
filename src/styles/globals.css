@@ -248,6 +248,20 @@ body {
   display: none;
 }
 
+/* ✅ FIX 2: Enhanced chat container scrolling */
+#chat-window {
+  overflow-y: auto !important;
+  scroll-behavior: smooth !important;
+  max-height: calc(100vh - 120px) !important; /* Adjust for header/footer */
+}
+
+/* Ensure chat container can scroll properly */
+.chat-container {
+  overflow-y: auto;
+  max-height: calc(100vh - 100px);
+  scroll-behavior: smooth;
+}
+
 .glass {
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);

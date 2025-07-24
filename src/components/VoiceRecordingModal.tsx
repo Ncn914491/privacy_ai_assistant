@@ -118,6 +118,23 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
         throw new Error('Voice recording is not available in browser mode. Please run the desktop application for voice features.');
       }
 
+      // ✅ FIX 4: Enhanced microphone access with better error handling
+      console.log('🎤 Requesting microphone access...');
+
+      // Check microphone permission first
+      if (navigator.permissions) {
+        try {
+          const permission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          console.log('🎤 Microphone permission status:', permission.state);
+
+          if (permission.state === 'denied') {
+            throw new Error('Microphone access denied. Please enable microphone permissions in your browser settings.');
+          }
+        } catch (permError) {
+          console.warn('⚠️ Could not check microphone permissions:', permError);
+        }
+      }
+
       // Request microphone access with optimized constraints for Vosk STT
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -295,7 +312,8 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
           setRecordingState('complete');
           setPartialTranscription('');
 
-          // Notify parent component with clean text
+          // ✅ FIX 3: Ensure transcribed text reaches LLM
+          console.log('🎤 [VOICE PIPELINE] Sending transcription to parent:', result.text.trim());
           onTranscriptionComplete?.(result.text.trim());
         } else {
           console.warn('⚠️ Transcription failed or empty');

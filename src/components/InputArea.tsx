@@ -58,9 +58,18 @@ export const InputArea: React.FC<InputAreaProps> = ({
     if (currentInput.trim() && !disabled && !isLoading) {
       onSendMessage(currentInput.trim());
       setCurrentInput('');
+
+      // Enhanced focus and scroll handling after message send
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
-        textareaRef.current.focus();
+
+        // Use requestAnimationFrame to ensure DOM updates before focusing
+        requestAnimationFrame(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        });
       }
     }
   };

@@ -22,6 +22,7 @@ import { useTTS } from '../hooks/useTTS';
 import VoiceRecordingModal from './VoiceRecordingModal';
 import RealtimeVoiceModal from './RealtimeVoiceModal';
 import RealtimeConversationModal from './RealtimeConversationModal';
+import AudioDiagnosticPanel from './AudioDiagnosticPanel';
 
 
 const ChatInterface: React.FC = () => {
@@ -29,9 +30,11 @@ const ChatInterface: React.FC = () => {
   const [showVoiceModal, setShowVoiceModal] = useState(false);
   const [showRealtimeVoiceModal, setShowRealtimeVoiceModal] = useState(false);
   const [showRealtimeConversationModal, setShowRealtimeConversationModal] = useState(false);
+  const [showAudioDiagnostic, setShowAudioDiagnostic] = useState(false);
   const { messages, addMessage, updateMessage, setLoading, isLoading, activeChatId } = useMultiChatStore();
   const { streamingState, stopStream } = useStreamingLLM();
   const currentStreamingMessageId = useRef<string | null>(null);
+  const chatWindowRef = useRef<HTMLDivElement>(null);
 
   // Python backend integration
   const {
@@ -660,6 +663,16 @@ const ChatInterface: React.FC = () => {
           >
             <Settings className="w-4 h-4" />
           </button>
+
+          {/* Audio Diagnostic Panel */}
+          <button
+            type="button"
+            onClick={() => setShowAudioDiagnostic(true)}
+            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+            title="Audio system diagnostics"
+          >
+            🎤
+          </button>
           
           {/* TTS Toggle */}
           <label className="flex items-center cursor-pointer">
@@ -800,6 +813,12 @@ const ChatInterface: React.FC = () => {
           onClose={() => setShowRealtimeConversationModal(false)}
         />
       )}
+
+      {/* Audio Diagnostic Panel */}
+      <AudioDiagnosticPanel
+        isOpen={showAudioDiagnostic}
+        onClose={() => setShowAudioDiagnostic(false)}
+      />
     </div>
   );
 };
