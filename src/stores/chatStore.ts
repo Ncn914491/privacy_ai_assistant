@@ -541,8 +541,8 @@ export const useMultiChatStore = create<MultiChatStore>()(
           if (response.success) {
             const summaries = response.sessions.map(summary => ({
               ...summary,
-              lastActivity: new Date(summary.lastActivity),
-              createdAt: new Date(summary.createdAt)
+              lastActivity: summary.lastActivity ? new Date(summary.lastActivity) : new Date(),
+              createdAt: summary.createdAt ? new Date(summary.createdAt) : new Date()
             }));
 
             set({ chatSummaries: summaries });

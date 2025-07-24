@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import {
   Cpu,
   HardDrive,
@@ -51,16 +50,34 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
       setIsLoading(true);
       setError(null);
 
-      const response = await invoke<{success: boolean, data: HardwareData, error?: string}>('get_hardware_info');
-      
-      if (response.success && response.data) {
-        setHardwareData(response.data);
+      console.log('🔧 Loading hardware information from backend...');
+
+      const response = await fetch('http://127.0.0.1:8000/hardware/info', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('🔧 Hardware data received:', data);
+
+      if (data.success && data.data) {
+        setHardwareData(data.data);
+        console.log('✅ Hardware data loaded successfully');
       } else {
-        setError(response.error || 'Failed to load hardware information');
+        const errorMsg = data.error || 'Failed to load hardware information';
+        console.error('❌ Hardware data error:', errorMsg);
+        setError(errorMsg);
       }
     } catch (err) {
-      console.error('Failed to load hardware info:', err);
-      setError(`Failed to load hardware info: ${err}`);
+      console.error('❌ Failed to load hardware info:', err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setError(`Failed to load hardware info: ${errorMsg}`);
     } finally {
       setIsLoading(false);
     }
@@ -69,10 +86,14 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
   const refreshHardware = async () => {
     try {
       setIsRefreshing(true);
-      await invoke('refresh_hardware_detection');
+      console.log('🔄 Refreshing hardware detection...');
+
+      // Just reload the hardware info - the backend will refresh automatically
       await loadHardwareInfo();
+
+      console.log('✅ Hardware refresh completed');
     } catch (err) {
-      console.error('Failed to refresh hardware:', err);
+      console.error('❌ Failed to refresh hardware:', err);
       setError(`Failed to refresh hardware: ${err}`);
     } finally {
       setIsRefreshing(false);
@@ -120,7 +141,7 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
     return (
       <div className={cn('flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg', className)}>
         <RefreshCw className="animate-spin" size={16} />
-        <span className="text-sm">Detecting hardware...</span>
+        <span className="text-sm">Loading hardware status...</span>
       </div>
     );
   }
@@ -135,6 +156,8 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
           onClick={refreshHardware}
           disabled={isRefreshing}
           className="ml-2 p-1 hover:bg-red-200 dark:hover:bg-red-800 rounded"
+          title="Refresh hardware detection"
+          aria-label="Refresh hardware detection"
         >
           <RefreshCw className={cn('w-3 h-3', isRefreshing && 'animate-spin')} />
         </button>
@@ -142,11 +165,30 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
     );
   }
 
-  if (!hardwareData) {
-    return null;
+  if (!hardwareData || !hardwareData.hardware || !hardwareData.runtime) {
+    return (
+      <div className={cn('bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-3', className)}>
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-gray-400" />
+          <span className="text-sm text-gray-500">Hardware data unavailable</span>
+        </div>
+      </div>
+    );
   }
 
   const { hardware, runtime } = hardwareData;
+
+  // Additional safety checks
+  if (!runtime || !runtime.mode) {
+    return (
+      <div className={cn('bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm p-3', className)}>
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-gray-400" />
+          <span className="text-sm text-gray-500">Runtime configuration unavailable</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm', className)}>

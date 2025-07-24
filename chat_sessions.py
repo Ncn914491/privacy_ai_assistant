@@ -79,10 +79,14 @@ class ChatSessionSummary(BaseModel):
     """Lightweight session summary for listing."""
     id: str
     title: str
-    message_count: int
-    last_activity: datetime
-    created_at: datetime
-    is_archived: Optional[bool] = False
+    message_count: int = Field(alias="messageCount")
+    last_activity: datetime = Field(alias="lastActivity")
+    created_at: datetime = Field(alias="createdAt")
+    is_archived: Optional[bool] = Field(default=False, alias="isArchived")
+
+    class Config:
+        populate_by_name = True  # Allow both field name and alias
+        by_alias = True  # Use aliases when serializing
 
 # ===== REQUEST/RESPONSE MODELS =====
 

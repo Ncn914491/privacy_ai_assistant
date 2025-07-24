@@ -2,6 +2,7 @@
 import wave
 import json
 import os
+import io
 from vosk import Model, KaldiRecognizer
 from pydub import AudioSegment
 
@@ -52,4 +53,25 @@ class STT:
             return processed_path
         except Exception as e:
             raise e
+
+    def transcribe_filelike(self, fileobj):
+        """Transcribe audio from a file-like object (BytesIO)"""
+        try:
+            with wave.open(fileobj, "rb") as wf:
+                if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or wf.getframerate() != 16000:
+                    return {"success": False, "error": "Audio file must be WAV format, 16kHz, 16-bit, mono."}
+
+                recognizer = KaldiRecognizer(self.model, wf.getframerate())
+                
+                while True:
+                    data = wf.readframes(4000)
+                    if len(data) == 0:
+                        break
+                    if recognizer.AcceptWaveform(data):
+                        pass
+
+                result = json.loads(recognizer.FinalResult())
+                return {"success": True, "text": result["text"]}
+        except Exception as e:
+            return {"success": False, "error": f"Transcription failed: {e}"}
 

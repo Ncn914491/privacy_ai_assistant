@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Mic, MicOff, Square, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { cn } from '../utils/cn';
-import { invoke } from '@tauri-apps/api/core';
+// import { invoke } from '@tauri-apps/api/core'; // Not used anymore
 import { TAURI_ENV } from '../utils/tauriDetection';
 
 interface VoiceRecordingModalProps {
@@ -11,11 +11,7 @@ interface VoiceRecordingModalProps {
   onRecordingStateChange?: (isRecording: boolean) => void;
 }
 
-interface SttResult {
-  text: string;
-  confidence: number;
-  success: boolean;
-}
+// SttResult interface removed - using backend API response format
 
 export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
   isOpen,
@@ -37,6 +33,7 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const mimeTypeRef = useRef<string>('webm');
 
   // Recording timer and audio level simulation
   useEffect(() => {
@@ -121,12 +118,12 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
         throw new Error('Voice recording is not available in browser mode. Please run the desktop application for voice features.');
       }
 
-      // Request microphone access with specific constraints for speech recognition
+      // Request microphone access with optimized constraints for Vosk STT
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,        // 16kHz for speech recognition
-          channelCount: 1,          // Mono
-          echoCancellation: true,   // Reduce echo
+          sampleRate: { ideal: 16000, min: 8000, max: 48000 },  // Prefer 16kHz but be flexible
+          channelCount: 1,          // Mono for Vosk compatibility
+          echoCancellation: true,   // Reduce echo for better recognition
           noiseSuppression: true,   // Reduce background noise
           autoGainControl: true     // Automatic gain control
         }
@@ -137,22 +134,44 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
 
       // Create MediaRecorder with the best available format for speech recognition
       let mediaRecorder: MediaRecorder;
-      let mimeType: string;
+      let mimeType: string = '';
+      let recordingOptions: MediaRecorderOptions = {};
 
-      // Try different formats in order of preference for speech recognition
-      if (MediaRecorder.isTypeSupported('audio/wav')) {
-        mimeType = 'audio/wav';
-      } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=pcm')) {
-        mimeType = 'audio/webm;codecs=pcm';
-      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-        mimeType = 'audio/webm';
-      } else {
-        mimeType = ''; // Let browser choose
+      // Try different formats in order of preference for Vosk compatibility
+      const preferredFormats = [
+        'audio/wav',
+        'audio/webm;codecs=pcm',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus'
+      ];
+
+      for (const format of preferredFormats) {
+        if (MediaRecorder.isTypeSupported(format)) {
+          mimeType = format;
+          recordingOptions.mimeType = format;
+          break;
+        }
       }
 
-      console.log('🎤 Using audio format:', mimeType || 'browser default');
+      // Set audio bitrate for better quality
+      if (mimeType) {
+        recordingOptions.audioBitsPerSecond = 128000; // 128 kbps for good quality
+      }
 
-      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      console.log('🎤 Using audio format:', mimeType || 'browser default', 'with options:', recordingOptions);
+
+      try {
+        mediaRecorder = new MediaRecorder(stream, recordingOptions);
+      } catch (error) {
+        console.warn('⚠️ Failed to create MediaRecorder with preferred options, using defaults:', error);
+        mediaRecorder = new MediaRecorder(stream);
+        mimeType = 'browser-default';
+      }
+
+      // Store mimeType for later use
+      mimeTypeRef.current = mimeType;
 
       mediaRecorderRef.current = mediaRecorder;
 
@@ -208,28 +227,112 @@ export const VoiceRecordingModal: React.FC<VoiceRecordingModalProps> = ({
       setRecordingState('processing');
       setPartialTranscription('🔄 Processing with Vosk...');
 
-      // Use the Tauri STT command
-      const result = await invoke<SttResult>('run_vosk_stt', { mic_on: true });
+      // Check if we have audio chunks
+      if (audioChunksRef.current.length === 0) {
+        throw new Error('No audio data recorded');
+      }
 
-      console.log('📝 Vosk result:', result);
+      // Create blob from audio chunks
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      console.log('📊 Audio blob size:', audioBlob.size, 'bytes');
 
-      if (result.success && result.text && result.text.trim().length > 0) {
-        console.log('✅ Vosk transcription successful:', result.text);
-        setTranscription(result.text);
-        setRecordingState('complete');
-        setPartialTranscription('');
+      if (audioBlob.size === 0) {
+        throw new Error('Audio recording is empty');
+      }
 
-        // Notify parent component with clean text
-        onTranscriptionComplete?.(result.text.trim());
-      } else {
-        console.warn('⚠️ Vosk transcription failed or empty');
-        setError('No speech detected. Please try again.');
-        setRecordingState('error');
+      // Convert blob to base64 for backend transmission (handle large files safely)
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      // Convert to base64 in smaller chunks to avoid stack overflow
+      let base64Audio = '';
+      const chunkSize = 1024; // Process in 1KB chunks to avoid stack overflow
+
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.slice(i, i + chunkSize);
+        // Use a safer method to convert to string
+        let binaryString = '';
+        for (let j = 0; j < chunk.length; j++) {
+          binaryString += String.fromCharCode(chunk[j]);
+        }
+        base64Audio += btoa(binaryString);
+      }
+
+      console.log('📤 Sending audio to backend for transcription...');
+
+      // Send to backend STT endpoint with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      try {
+        const response = await fetch('http://127.0.0.1:8000/stt/transcribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            audio_data: base64Audio,
+            format: mimeTypeRef.current || 'webm',
+            sample_rate: 16000,
+            channels: 1
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unknown error');
+          throw new Error(`Backend error (${response.status}): ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('📝 Backend STT result:', result);
+
+        if (result.success && result.text && result.text.trim().length > 0) {
+          console.log('✅ Transcription successful:', result.text);
+          setTranscription(result.text);
+          setRecordingState('complete');
+          setPartialTranscription('');
+
+          // Notify parent component with clean text
+          onTranscriptionComplete?.(result.text.trim());
+        } else {
+          console.warn('⚠️ Transcription failed or empty');
+          const errorMsg = result.error || 'No speech detected. Please try again.';
+          setError(errorMsg);
+          setRecordingState('error');
+        }
+
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw new Error('Request timed out. Please try again with a shorter recording.');
+        } else {
+          throw fetchError;
+        }
       }
 
     } catch (error) {
-      console.error('❌ Vosk transcription error:', error);
-      setError(`Transcription failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('❌ Transcription error:', error);
+      let errorMessage = 'Unknown error occurred during transcription';
+
+      if (error instanceof Error) {
+        if (error.message.includes('fetch')) {
+          errorMessage = 'Failed to connect to transcription service. Please ensure the backend is running.';
+        } else if (error.message.includes('timeout') || error.message.includes('timed out')) {
+          errorMessage = 'Transcription request timed out. Please try with a shorter recording.';
+        } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+          errorMessage = 'Network error. Please check your connection and ensure the backend is running on port 8000.';
+        } else {
+          errorMessage = error.message;
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+
+      setError(`Transcription failed: ${errorMessage}`);
       setRecordingState('error');
     }
   };

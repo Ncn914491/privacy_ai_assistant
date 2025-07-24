@@ -1,0 +1,152 @@
+{
+  "id": "chat_01c6805abf28",
+  "title": "New Chat 07/23 22:59",
+  "messages": [
+    {
+      "id": "msg_d1fe589fa8bc",
+      "content": "🤔 Thinking...",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:29:49.265897+00:00",
+      "token_count": 3,
+      "metadata": null
+    },
+    {
+      "id": "msg_cae459ae4066",
+      "content": "I'm doing well, thank you for asking! As a large language model, I don't experience emotions like humans do, but my systems are running smoothly and I'm ready to assist you. How can I help you today? 😊",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:30:06.500051+00:00",
+      "token_count": 50,
+      "metadata": null
+    },
+    {
+      "id": "msg_76e25ac70788",
+      "content": "hi how are you",
+      "role": "user",
+      "timestamp": "2025-07-23T17:30:06.605941+00:00",
+      "token_count": 5,
+      "metadata": null
+    },
+    {
+      "id": "msg_8857cdf8cead",
+      "content": "🧪 Testing STT with synthesize.wav file",
+      "role": "user",
+      "timestamp": "2025-07-23T17:30:59.756492+00:00",
+      "token_count": 9,
+      "metadata": null
+    },
+    {
+      "id": "msg_b60a189f601d",
+      "content": "📝 Transcribed: \"Tell me about the Howard university\"",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:31:03.287246+00:00",
+      "token_count": 13,
+      "metadata": null
+    },
+    {
+      "id": "msg_83d3ec0e1532",
+      "content": "🐍 Testing Python backend...",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:33:41.466110+00:00",
+      "token_count": 6,
+      "metadata": null
+    },
+    {
+      "id": "msg_b2d12bd42b00",
+      "content": "✅ Python backend is healthy and ready",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:33:41.605116+00:00",
+      "token_count": 9,
+      "metadata": null
+    },
+    {
+      "id": "msg_8172752119bc",
+      "content": "Hello, this is a test of the voice to LLM pipeline",
+      "role": "user",
+      "timestamp": "2025-07-23T17:33:43.741398+00:00",
+      "token_count": 14,
+      "metadata": null
+    },
+    {
+      "id": "msg_9e97d9a71bcb",
+      "content": "🤖 Testing LLM request...",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:33:43.885813+00:00",
+      "token_count": 6,
+      "metadata": null
+    },
+    {
+      "id": "msg_1300840fd765",
+      "content": "📋 Available models: gemma3n:latest, qwen2.5:7b, llama3.1:8b",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:33:44.020425+00:00",
+      "token_count": 14,
+      "metadata": null
+    },
+    {
+      "id": "msg_c8ccf7f88bf8",
+      "content": "🤔 Thinking...",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:33:44.186900+00:00",
+      "token_count": 3,
+      "metadata": null
+    },
+    {
+      "id": "msg_318155348bee",
+      "content": "🤖 LLM Response: Hello from Python backend! 🐍✨",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:33:50.959748+00:00",
+      "token_count": 11,
+      "metadata": null
+    },
+    {
+      "id": "msg_51a3498454c2",
+      "content": "Hello, this is a test of the voice to LLM pipeline",
+      "role": "user",
+      "timestamp": "2025-07-23T17:33:51.169665+00:00",
+      "token_count": 14,
+      "metadata": null
+    },
+    {
+      "id": "msg_39dbe7e552e2",
+      "content": "🤖 Testing LLM request...\nAssisstant: 📋 Available models: gemma3n:latest, qwen2.5:7b, llama3.1:8b\nAssisstant: 🤔 Thinking...\nAssisstant: 🤖 LLM Response: Hello! It's great to hear from you. Is there anything specific you'd like to test or ask? 😊",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:34:39.252521+00:00",
+      "token_count": 60,
+      "metadata": null
+    },
+    {
+      "id": "msg_f55efc401a22",
+      "content": "❌ STT Test Error: Request timeout",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:46:07.398031+00:00",
+      "token_count": 8,
+      "metadata": null
+    },
+    {
+      "id": "msg_b3fe2f3803ee",
+      "content": "🤔 Thinking...",
+      "role": "assistant",
+      "timestamp": "2025-07-23T18:00:25.691664+00:00",
+      "token_count": 3,
+      "metadata": null
+    },
+    {
+      "id": "msg_88750c34b1a1",
+      "content": "hi",
+      "role": "user",
+      "timestamp": "2025-07-23T18:00:25.905279+00:00",
+      "token_count": 1,
+      "metadata": null
+    }
+  ],
+  "created_at": "2025-07-23T17:29:40.443687+00:00",
+  "updated_at": "2025-07-23T18:00:25.905319+00:00",
+  "metadata": {
+    "model": "gemma3n:latest",
+    "token_count": 229,
+    "message_count": 17,
+    "last_activity": "2025-07-23T18:00:25.905304+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

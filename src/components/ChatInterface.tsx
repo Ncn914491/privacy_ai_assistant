@@ -5,6 +5,9 @@ import ModelStatusBadge from './ModelStatusBadge';
 import HardwareStatusBadge from './HardwareStatusBadge';
 import ThinkingIndicator from './ThinkingIndicator';
 import StartupDiagnostic from './StartupDiagnostic';
+// Loading and error states available for future use
+// import { MessageLoading, ConnectionLoading, InlineLoading } from './LoadingStates';
+// import { ConnectionError, ModelError, DetailedError } from './ErrorStates';
 import { useMultiChatStore } from '../stores/chatStore';
 import { invoke } from '@tauri-apps/api/core';
 import { modelHealthChecker, ModelHealthStatus } from '../utils/modelHealth';
@@ -13,16 +16,20 @@ import { TAURI_ENV } from '../utils/tauriDetection';
 import { SttResult } from '../types';
 import { useStreamingLLM } from '../hooks/useStreamingLLM';
 import { usePythonBackendLLM } from '../hooks/usePythonBackendLLM';
+import { usePythonBackendStreaming } from '../hooks/usePythonBackendStreaming';
+import { useTTS } from '../hooks/useTTS';
 
 import VoiceRecordingModal from './VoiceRecordingModal';
 import RealtimeVoiceModal from './RealtimeVoiceModal';
+import RealtimeConversationModal from './RealtimeConversationModal';
 
 
 const ChatInterface: React.FC = () => {
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [showVoiceModal, setShowVoiceModal] = useState(false);
   const [showRealtimeVoiceModal, setShowRealtimeVoiceModal] = useState(false);
-  const { messages, addMessage, updateMessage, setLoading, isLoading, generateContextAwareResponse, activeChatId } = useMultiChatStore();
+  const [showRealtimeConversationModal, setShowRealtimeConversationModal] = useState(false);
+  const { messages, addMessage, updateMessage, setLoading, isLoading, activeChatId } = useMultiChatStore();
   const { streamingState, stopStream } = useStreamingLLM();
   const currentStreamingMessageId = useRef<string | null>(null);
 
@@ -35,7 +42,15 @@ const ChatInterface: React.FC = () => {
     getAvailableModels
   } = usePythonBackendLLM();
 
-  // Python backend streaming (removed unused import)
+  // Python backend streaming
+  const {
+    streamingState: backendStreamingState,
+    startStream,
+    stopStream: stopBackendStream
+  } = usePythonBackendStreaming();
+
+  // Text-to-Speech
+  const { ttsState, speak, stop: stopTTS } = useTTS();
 
   // Monitor streaming state for debugging (keeping this for fallback)
   useEffect(() => {
@@ -70,16 +85,57 @@ const ChatInterface: React.FC = () => {
   const [showDiagnostic, setShowDiagnostic] = useState(true);
   const [, setDiagnosticResults] = useState<any[]>([]);
 
+  // Enhanced scrolling with better timing and reliability
+  const scrollToBottomRef = useRef<() => void>();
+
   useEffect(() => {
-    const scrollToBottom = () => {
+    scrollToBottomRef.current = () => {
       const chatWindow = document.getElementById('chat-window');
       if (chatWindow) {
+        // Force immediate scroll to bottom
         chatWindow.scrollTop = chatWindow.scrollHeight;
+
+        // Then apply smooth scrolling for subsequent updates
+        requestAnimationFrame(() => {
+          chatWindow.scrollTo({
+            top: chatWindow.scrollHeight,
+            behavior: 'smooth'
+          });
+        });
       }
     };
+  });
 
-    scrollToBottom();
+  // Scroll to bottom when messages change with improved timing
+  useEffect(() => {
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      if (scrollToBottomRef.current) {
+        scrollToBottomRef.current();
+      }
+    });
   }, [messages]);
+
+  // Enhanced scroll behavior for loading states
+  useEffect(() => {
+    if (isLoading) {
+      // Immediate scroll when loading starts
+      requestAnimationFrame(() => {
+        if (scrollToBottomRef.current) {
+          scrollToBottomRef.current();
+        }
+      });
+
+      // Additional scroll after a short delay to catch any delayed UI updates
+      const timeoutId = setTimeout(() => {
+        if (scrollToBottomRef.current) {
+          scrollToBottomRef.current();
+        }
+      }, 150);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isLoading]);
 
   useEffect(() => {
     // Subscribe to model health status
@@ -296,12 +352,17 @@ const ChatInterface: React.FC = () => {
       return;
     }
 
+    // Add the user message FIRST (proper chronological order)
+    const userMessageId = Date.now();
+    addMessage(content, 'user', userMessageId);
+
     setLoading(true);
 
-    // Add a streaming message placeholder
-    const streamingMessageId = Date.now();
+    // Add assistant response placeholder AFTER user message
+    const streamingMessageId = Date.now() + 1; // Ensure different ID
     addMessage('🤔 Thinking...', 'assistant', streamingMessageId);
 
+    console.log('📝 Created user message with ID:', userMessageId);
     console.log('📝 Created streaming message with ID:', streamingMessageId);
 
     // Store the streaming message ID immediately for stop button functionality
@@ -326,26 +387,46 @@ const ChatInterface: React.FC = () => {
         await startBackend();
       }
 
-      console.log('🧠 Using context-aware LLM generation...');
-      updateMessage(streamingMessageId.toString(), { content: '🤖 Generating context-aware response...' });
+      console.log('🧠 Using streaming LLM generation...');
+      updateMessage(streamingMessageId.toString(), { content: '🤖 Connecting to AI model...' });
 
-      // Use context-aware response generation
-      const response = await generateContextAwareResponse(content);
+      // Use streaming response generation
+      await startStream(
+        content,
+        'llama3.1:8b', // Default model
+        // onChunk callback - update message with streaming content
+        (chunk: string) => {
+          console.log('📝 Streaming chunk received:', chunk.length, 'chars');
+          updateMessage(streamingMessageId.toString(), { content: chunk });
+        },
+        // onComplete callback
+        () => {
+          console.log('✅ Streaming completed');
+          setLoading(false);
+          currentStreamingMessageId.current = null;
 
-      // Update the message with the response
-      updateMessage(streamingMessageId.toString(), { content: response });
+          // Auto-play TTS if enabled and response is not too long
+          if (ttsEnabled && backendStreamingState.streamedContent && backendStreamingState.streamedContent.length < 500) {
+            console.log('🔊 Starting TTS for completed response...');
+            speak(backendStreamingState.streamedContent).catch((error) => {
+              console.error('TTS Error:', error);
+            });
+          } else if (backendStreamingState.streamedContent && backendStreamingState.streamedContent.length >= 500) {
+            console.log('⏭️ Skipping TTS for long response (length:', backendStreamingState.streamedContent.length, ')');
+          }
+        },
+        // onError callback
+        (error: string) => {
+          console.error('❌ Streaming error:', error);
+          updateMessage(streamingMessageId.toString(), { content: `❌ Error: ${error}` });
+          setLoading(false);
+          currentStreamingMessageId.current = null;
+        }
+      );
 
-      console.log('✅ Context-aware response generated, length:', response.length);
+      console.log('✅ Streaming started successfully');
 
-      // TTS for responses (skip for very long responses)
-      if (ttsEnabled && response.length < 1000) {
-        console.log('🔊 Starting TTS for response...');
-        invoke('run_piper_tts', { text: response }).catch((error) => {
-          console.error('TTS Error:', error);
-        });
-      } else if (response.length >= 1000) {
-        console.log('⏭️ Skipping TTS for long response (length:', response.length, ')');
-      }
+      // Note: TTS will be handled in the onComplete callback if needed
 
     } catch (error) {
       console.error('❌ Error in handleSendMessage:', error);
@@ -366,39 +447,53 @@ const ChatInterface: React.FC = () => {
   };
 
   const handleVoiceTranscription = (transcription: string) => {
-    console.log('🎤 Voice transcription received:', transcription);
-    console.log('🎤 Transcription length:', transcription.length);
-    console.log('🎤 Transcription content:', JSON.stringify(transcription));
-    console.log('🎤 Current system ready state:', systemReady);
-    console.log('🎤 Current model health:', modelHealth);
-    console.log('🎤 Current streaming state:', streamingState);
+    console.log('🎤 [VOICE PIPELINE] Voice transcription received:', transcription);
+    console.log('🎤 [VOICE PIPELINE] Transcription length:', transcription.length);
+    console.log('🎤 [VOICE PIPELINE] Transcription content:', JSON.stringify(transcription));
+    console.log('🎤 [VOICE PIPELINE] Current system ready state:', systemReady);
+    console.log('🎤 [VOICE PIPELINE] Current model health:', modelHealth);
+    console.log('🎤 [VOICE PIPELINE] Current streaming state:', streamingState);
+    console.log('🎤 [VOICE PIPELINE] Active chat ID:', activeChatId);
 
     setShowVoiceModal(false);
+    setShowRealtimeVoiceModal(false);
 
     // Validate transcription before sending
     if (!transcription || transcription.trim().length === 0) {
-      console.warn('⚠️ Empty transcription received, not sending to LLM');
+      console.warn('⚠️ [VOICE PIPELINE] Empty transcription received, not sending to LLM');
       addMessage('❌ No speech detected. Please try again.', 'assistant');
       return;
     }
 
+    const cleanTranscription = transcription.trim();
+    console.log('🎤 [VOICE PIPELINE] Clean transcription:', cleanTranscription);
+
     // Check system readiness - be more lenient
     if (!systemReady) {
-      console.warn('⚠️ System not ready, but attempting to process voice input anyway');
+      console.warn('⚠️ [VOICE PIPELINE] System not ready, but attempting to process voice input anyway');
       // Don't return - let's try anyway
     }
 
     if (!modelHealth.isAvailable && modelHealth.connectionState !== 'checking') {
-      console.warn('⚠️ Model not available, but attempting voice input anyway');
+      console.warn('⚠️ [VOICE PIPELINE] Model not available, but attempting voice input anyway');
       // Don't return - the LLM integration will handle backend startup
     }
 
-    console.log('🚀 All checks passed, sending transcription to LLM:', transcription);
+    if (!activeChatId) {
+      console.error('❌ [VOICE PIPELINE] No active chat session available');
+      addMessage('❌ No active chat session. Please create a new chat first.', 'assistant');
+      return;
+    }
 
-    // Send the transcribed text as a message with a small delay to ensure UI updates
+    console.log('✅ [VOICE PIPELINE] All checks passed, sending transcription to LLM:', cleanTranscription);
+
+    // Send the transcribed text as a message (handleSendMessage will add the user message)
     setTimeout(() => {
-      console.log('🚀 Calling handleSendMessage with transcription');
-      handleSendMessage(transcription);
+      console.log('🚀 [VOICE PIPELINE] Calling handleSendMessage with transcription');
+      handleSendMessage(cleanTranscription).catch((error) => {
+        console.error('❌ [VOICE PIPELINE] handleSendMessage failed:', error);
+        addMessage(`❌ Failed to process voice input: ${error}`, 'assistant');
+      });
     }, 100);
   };
 
@@ -437,14 +532,56 @@ const ChatInterface: React.FC = () => {
             </button>
           )}
 
+          {/* Real-time Conversation Button */}
+          {TAURI_ENV.isTauri && systemReady && (
+            <button
+              type="button"
+              onClick={() => setShowRealtimeConversationModal(true)}
+              disabled={isLoading || streamingState.isStreaming}
+              className="p-2 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Real-time voice conversation"
+            >
+              💬
+            </button>
+          )}
+
+          {/* TTS Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setTtsEnabled(!ttsEnabled)}
+            className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${
+              ttsEnabled
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-gray-500 dark:text-gray-400'
+            }`}
+            title={ttsEnabled ? "Disable voice output" : "Enable voice output"}
+          >
+            {ttsEnabled ? '🔊' : '🔇'}
+          </button>
+
+          {/* TTS Stop Button (show when playing) */}
+          {ttsState.isPlaying && (
+            <button
+              type="button"
+              onClick={stopTTS}
+              className="p-2 text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+              title="Stop voice output"
+            >
+              ⏹️
+            </button>
+          )}
+
           {/* Stop Response Button - Show during loading or streaming */}
-          {(streamingState.isStreaming || (isLoading && currentStreamingMessageId.current)) && (
+          {(backendStreamingState.isStreaming || streamingState.isStreaming || (isLoading && currentStreamingMessageId.current)) && (
             <button
               type="button"
               onClick={async () => {
                 console.log('⏹️ Stop button clicked');
-                if (streamingState.isStreaming) {
-                  console.log('⏹️ Stopping active stream');
+                if (backendStreamingState.isStreaming) {
+                  console.log('⏹️ Stopping backend stream');
+                  stopBackendStream();
+                } else if (streamingState.isStreaming) {
+                  console.log('⏹️ Stopping Tauri stream');
                   await stopStream();
                 } else if (currentStreamingMessageId.current) {
                   console.log('⏹️ Canceling loading state');
@@ -576,9 +713,9 @@ const ChatInterface: React.FC = () => {
       {/* Chat window */}
       <div
         id="chat-window"
-        className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900"
+        className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 scroll-smooth"
       >
-        <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="max-w-4xl mx-auto px-4 py-6 min-h-full flex flex-col">
           {/* Welcome message when system is ready */}
           {systemReady && messages.length === 0 && (
             <div className="text-center py-8">
@@ -590,20 +727,29 @@ const ChatInterface: React.FC = () => {
           )}
           
           {/* Messages */}
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
-          
-          {/* Thinking Indicator */}
-          <ThinkingIndicator isVisible={isLoading} />
+          <div className="flex-1">
+            {messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
+
+            {/* Thinking Indicator */}
+            <ThinkingIndicator isVisible={isLoading} />
+          </div>
+
+          {/* Spacer to push content up and ensure proper scrolling */}
+          <div className="h-4 flex-shrink-0" />
         </div>
       </div>
 
       {/* Input area */}
       <InputArea
         onSendMessage={handleSendMessage}
-        disabled={!systemReady || !modelHealth.isAvailable || streamingState.isStreaming}
-        placeholder={streamingState.isStreaming ? "AI is responding..." : "Type your message..."}
+        disabled={!systemReady || !modelHealth.isAvailable || streamingState.isStreaming || backendStreamingState.isStreaming}
+        placeholder={
+          backendStreamingState.isStreaming || streamingState.isStreaming
+            ? "AI is responding..."
+            : "Type your message..."
+        }
       />
       
       {/* Diagnostic Panel */}
@@ -644,6 +790,14 @@ const ChatInterface: React.FC = () => {
           onClose={() => setShowRealtimeVoiceModal(false)}
           onTranscriptionComplete={handleVoiceTranscription}
           onRecordingStateChange={handleVoiceRecordingStateChange}
+        />
+      )}
+
+      {/* Real-time Conversation Modal */}
+      {showRealtimeConversationModal && (
+        <RealtimeConversationModal
+          isOpen={showRealtimeConversationModal}
+          onClose={() => setShowRealtimeConversationModal(false)}
         />
       )}
     </div>

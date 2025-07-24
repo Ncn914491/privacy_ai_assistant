@@ -138,7 +138,13 @@ pub fn get_diagnostic_info() -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn check_ollama_service() -> Result<bool, CommandError> {
     info!("Checking Ollama service status...");
-    match reqwest::get("http://localhost:11434/api/version").await {
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(CommandError::Reqwest)?;
+    
+    match client.get("http://localhost:11434/api/version").send().await {
         Ok(response) => {
             if response.status().is_success() {
                 info!("✅ Ollama service is responsive.");
@@ -149,8 +155,9 @@ pub async fn check_ollama_service() -> Result<bool, CommandError> {
             }
         }
         Err(e) => {
-            error!("❌ Failed to connect to Ollama service: {}", e);
-            Err(CommandError::Reqwest(e))
+            error!("❌ Failed to connect to Ollama service (timeout or connection error): {}", e);
+            // Return false instead of error to prevent UI blocking
+            Ok(false)
         }
     }
 }
@@ -158,7 +165,12 @@ pub async fn check_ollama_service() -> Result<bool, CommandError> {
 #[tauri::command]
 pub async fn test_gemma_model() -> Result<bool, CommandError> {
     info!("Testing Gemma 3n model...");
-    let client = reqwest::Client::new();
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))  // Increased timeout for model loading
+        .build()
+        .map_err(CommandError::Reqwest)?;
+    
     let payload = serde_json::json!({
         "model": "gemma3n:latest",
         "prompt": "Respond with 'ok'",
@@ -176,8 +188,9 @@ pub async fn test_gemma_model() -> Result<bool, CommandError> {
             }
         }
         Err(e) => {
-            error!("❌ Failed to get response from Gemma model: {}", e);
-            Err(CommandError::Reqwest(e))
+            error!("❌ Failed to get response from Gemma model (timeout or connection error): {}", e);
+            // Return false instead of error to prevent UI blocking
+            Ok(false)
         }
     }
 }

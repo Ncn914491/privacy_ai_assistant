@@ -1,0 +1,15 @@
+{
+  "id": "chat_2a02ce7d76cd",
+  "title": "Fix Verification Test",
+  "messages": [],
+  "created_at": "2025-07-23T17:28:28.570395+00:00",
+  "updated_at": "2025-07-23T17:28:28.570449+00:00",
+  "metadata": {
+    "model": "gemma3n:latest",
+    "token_count": 0,
+    "message_count": 0,
+    "last_activity": "2025-07-23T17:28:28.570438+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

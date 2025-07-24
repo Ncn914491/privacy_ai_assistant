@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 interface STTResult {
-  type: 'partial' | 'final';
+  type: 'partial' | 'final' | 'error' | 'ping' | 'ready' | 'heartbeat';
   text: string;
-  timestamp: number;
+  timestamp?: number;
 }
 
 interface UseRealtimeSTTReturn {
@@ -53,7 +53,7 @@ export const useRealtimeSTT = (): UseRealtimeSTTReturn => {
     return int16Array;
   }, []);
 
-  // Request microphone permission
+  // Request microphone permission with improved error handling
   const requestMicPermission = useCallback(async (): Promise<boolean> => {
     try {
       setMicPermission('checking');
@@ -62,24 +62,37 @@ export const useRealtimeSTT = (): UseRealtimeSTTReturn => {
 
       // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('getUserMedia is not supported in this browser');
+        throw new Error('getUserMedia is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Edge.');
+      }
+
+      // Check if we're in a secure context (HTTPS or localhost)
+      if (!window.isSecureContext && location.hostname !== 'localhost') {
+        throw new Error('Microphone access requires a secure connection (HTTPS). Please use HTTPS or localhost.');
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,
+          sampleRate: { ideal: 16000, min: 8000, max: 48000 },
           channelCount: 1,
-          echoCancellation: false,  // Disable for better Vosk compatibility
-          noiseSuppression: false,  // Disable for better Vosk compatibility
-          autoGainControl: false    // Disable for better Vosk compatibility
+          echoCancellation: true,   // Enable for better quality
+          noiseSuppression: true,   // Enable for better quality
+          autoGainControl: true     // Enable for consistent volume
         }
       });
 
-      // Stop the stream immediately - we just needed to check permission
+      // Test the stream briefly to ensure it's working
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      source.connect(analyser);
+
+      // Clean up test
+      source.disconnect();
+      audioContext.close();
       stream.getTracks().forEach(track => track.stop());
 
       setMicPermission('granted');
-      console.log('✅ Microphone permission granted');
+      console.log('✅ Microphone permission granted and tested');
       return true;
     } catch (error: any) {
       console.error('❌ Microphone permission error:', error);
@@ -129,58 +142,100 @@ export const useRealtimeSTT = (): UseRealtimeSTTReturn => {
     }
   }, []);
 
-  // Start audio capture and streaming
+  // Start audio capture and streaming with improved error handling
   const startAudioCapture = useCallback(async () => {
     try {
       console.log('🎤 Starting audio capture...');
-      
-      // Get media stream
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+
+      // Get media stream with optimized settings for Vosk
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,
+          sampleRate: { ideal: 16000, min: 8000, max: 48000 },
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true
-        } 
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       });
-      
+
       mediaStreamRef.current = stream;
+
+      // Verify stream is active
+      const tracks = stream.getAudioTracks();
+      if (tracks.length === 0) {
+        throw new Error('No audio tracks found in media stream');
+      }
+
+      const track = tracks[0];
+      if (!track.enabled) {
+        throw new Error('Audio track is disabled');
+      }
+
+      console.log('🎤 Audio track settings:', track.getSettings());
+
+      // Create audio context with error handling
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 16000
+        });
+        audioContextRef.current = audioContext;
+
+        // Resume context if suspended (required by some browsers)
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+      } catch (contextError) {
+        throw new Error(`Failed to create audio context: ${contextError}`);
+      }
       
-      // Create audio context
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: 16000
-      });
-      audioContextRef.current = audioContext;
-      
-      // Create audio source
-      const source = audioContext.createMediaStreamSource(stream);
-      
+      // Create audio source with error handling
+      let source: MediaStreamAudioSourceNode;
+      try {
+        source = audioContextRef.current.createMediaStreamSource(stream);
+      } catch (sourceError) {
+        throw new Error(`Failed to create audio source: ${sourceError}`);
+      }
+
       // Create script processor (deprecated but still widely supported)
       // Note: In production, consider using AudioWorklet for better performance
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const bufferSize = 4096; // Good balance between latency and performance
+      const processor = audioContextRef.current.createScriptProcessor(bufferSize, 1, 1);
       processorRef.current = processor;
-      
+
       processor.onaudioprocess = (event) => {
         if (!isRecording || !websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
           return;
         }
-        
-        const inputBuffer = event.inputBuffer.getChannelData(0);
-        const pcmData = convertFloat32ToInt16(inputBuffer);
-        
-        // Send PCM data as binary to WebSocket
+
         try {
-          websocketRef.current.send(pcmData.buffer);
+          const inputBuffer = event.inputBuffer.getChannelData(0);
+
+          // Check for valid audio data
+          const hasAudio = inputBuffer.some(sample => Math.abs(sample) > 0.001);
+          if (!hasAudio) {
+            return; // Skip silent frames
+          }
+
+          const pcmData = convertFloat32ToInt16(inputBuffer);
+
+          // Send PCM data as binary to WebSocket
+          if (websocketRef.current.readyState === WebSocket.OPEN) {
+            websocketRef.current.send(pcmData.buffer);
+          }
         } catch (error) {
-          console.error('❌ Failed to send audio data:', error);
+          console.error('❌ Failed to process audio data:', error);
+          setError('Audio processing error occurred');
         }
       };
-      
-      // Connect audio nodes
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      
-      console.log('✅ Audio capture started');
+
+      // Connect audio nodes with error handling
+      try {
+        source.connect(processor);
+        processor.connect(audioContextRef.current.destination);
+        console.log('✅ Audio capture started with buffer size:', bufferSize);
+      } catch (connectionError) {
+        throw new Error(`Failed to connect audio nodes: ${connectionError}`);
+      }
       
     } catch (error) {
       console.error('❌ Failed to start audio capture:', error);
@@ -214,11 +269,28 @@ export const useRealtimeSTT = (): UseRealtimeSTTReturn => {
     return new Promise((resolve, reject) => {
       try {
         console.log('🔌 Connecting to Python backend WebSocket...');
-        
+
+        // Check if WebSocket is supported
+        if (!window.WebSocket) {
+          throw new Error('WebSocket is not supported in this browser');
+        }
+
         const ws = new WebSocket(PYTHON_BACKEND_WS_URL);
-        
+
+        // Set connection timeout with better error handling
+        const connectionTimeout = setTimeout(() => {
+          console.error('❌ WebSocket connection timeout');
+          if (ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+          }
+          const errorMsg = 'Connection timeout. Please ensure:\n1. Python backend is running on port 8000\n2. No firewall is blocking the connection\n3. The STT service is properly initialized';
+          setError(errorMsg);
+          reject(new Error('Connection timeout'));
+        }, 15000); // 15 second timeout for slower systems
+
         ws.onopen = () => {
           console.log('✅ WebSocket connected to Python backend');
+          clearTimeout(connectionTimeout);
           setIsConnected(true);
           setError(null);
           reconnectAttempts.current = 0;
@@ -228,55 +300,94 @@ export const useRealtimeSTT = (): UseRealtimeSTTReturn => {
         
         ws.onmessage = (event) => {
           try {
-            const result: STTResult = JSON.parse(event.data);
+            // Handle both text and binary messages
+            let data: string;
+            if (typeof event.data === 'string') {
+              data = event.data;
+            } else {
+              // Convert binary data to string if needed
+              data = new TextDecoder().decode(event.data);
+            }
+
+            const result: STTResult = JSON.parse(data);
             console.log('📤 STT result received:', result);
 
             if (result.type === 'partial') {
               setPartialText(result.text);
               console.log('🔄 Partial transcription:', result.text);
             } else if (result.type === 'final') {
-              const newFinalText = (prev: string) => prev + (prev ? ' ' : '') + result.text;
-              setFinalText(newFinalText);
+              setFinalText(prev => {
+                const newText = prev + (prev ? ' ' : '') + result.text;
+                console.log('🎯 Final transcription updated:', newText);
+                return newText;
+              });
               setPartialText(''); // Clear partial when we get final
-              console.log('🎯 Final transcription:', result.text);
             } else if (result.type === 'error') {
               console.error('❌ STT error from backend:', result.text);
-              setError(result.text || 'STT processing error');
+              setError(result.text || 'STT processing error occurred');
+            } else if (result.type === 'ping') {
+              // Respond to server ping to keep connection alive
+              console.debug('🏓 Received ping, sending pong');
+              try {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+                }
+              } catch (pongError) {
+                console.error('❌ Failed to send pong:', pongError);
+              }
+            } else if (result.type === 'ready') {
+              console.log('✅ STT WebSocket ready for audio streaming');
+              setError(null);
+            } else if (result.type === 'heartbeat') {
+              console.debug('💓 Heartbeat received - connection alive');
+            } else {
+              console.warn('⚠️ Unknown message type received:', result.type);
             }
           } catch (e) {
             console.error('❌ Failed to parse STT result:', e, 'Raw data:', event.data);
-            setError('Failed to parse transcription result');
+            setError('Failed to parse transcription result. The backend may be sending invalid data.');
           }
         };
         
         ws.onerror = (error) => {
           console.error('❌ WebSocket error:', error);
-          setError('WebSocket connection error');
+          clearTimeout(connectionTimeout);
+          setError('WebSocket connection failed - please check if the backend server is running on port 8000');
           reject(new Error('WebSocket connection failed'));
         };
         
         ws.onclose = (event) => {
           console.log('🔌 WebSocket closed:', event.code, event.reason);
+          clearTimeout(connectionTimeout);
           setIsConnected(false);
           setIsRecording(false);
           websocketRef.current = null;
 
-          // Attempt to reconnect if it wasn't a clean close and we're not intentionally disconnecting
-          if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
+          // Only attempt to reconnect if it wasn't a clean close (1000) and we haven't exceeded max attempts
+          const wasCleanClose = event.code === 1000;
+          const shouldReconnect = !wasCleanClose && reconnectAttempts.current < maxReconnectAttempts;
+          
+          if (shouldReconnect) {
             reconnectAttempts.current++;
-            console.log(`🔄 Attempting to reconnect (${reconnectAttempts.current}/${maxReconnectAttempts})...`);
+            const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 10000); // Exponential backoff, max 10s
+            
+            console.log(`🔄 Connection lost (code: ${event.code}). Reconnecting in ${backoffDelay}ms (attempt ${reconnectAttempts.current}/${maxReconnectAttempts})...`);
             setError(`Connection lost. Reconnecting... (${reconnectAttempts.current}/${maxReconnectAttempts})`);
 
             reconnectTimeoutRef.current = setTimeout(() => {
+              console.log('🔄 Attempting reconnection...');
               connect().catch((error) => {
                 console.error('❌ Reconnection failed:', error);
                 if (reconnectAttempts.current >= maxReconnectAttempts) {
-                  setError('Failed to reconnect to STT service. Please refresh the page.');
+                  setError('Failed to reconnect to STT service after multiple attempts. Please refresh the page.');
                 }
               });
-            }, Math.min(2000 * reconnectAttempts.current, 10000)); // Exponential backoff with max 10s
+            }, backoffDelay);
           } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-            setError('Failed to reconnect to STT service. Please refresh the page.');
+            console.error('❌ Max reconnection attempts reached');
+            setError('Failed to reconnect to STT service after multiple attempts. Please refresh the page.');
+          } else if (wasCleanClose) {
+            console.log('✅ WebSocket closed cleanly');
           }
         };
         

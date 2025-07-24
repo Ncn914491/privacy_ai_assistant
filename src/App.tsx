@@ -3,12 +3,16 @@ import { invoke } from '@tauri-apps/api/core';
 import ChatInterface from './components/ChatInterface';
 import BrowserModeBlocker from './components/BrowserModeBlocker';
 import StartupDiagnostic from './components/StartupDiagnostic'; // Import the diagnostic component
+import ErrorBoundary from './components/ErrorBoundary';
 import Sidebar from './components/Sidebar';
+import { AppInitializingLoader } from './components/LoadingStates';
+import { FullScreenError } from './components/ErrorStates';
 import { useAppStore } from './stores/chatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
 import { ensureEnvironment, EnvironmentCapabilities, TAURI_ENV } from './utils/tauriDetection';
+import { appLogger, tauriLogger } from './utils/logger';
 
 // Define application states
 type AppState = 'initializing' | 'diagnostics' | 'ready' | 'browser_mode' | 'error';
@@ -18,18 +22,25 @@ const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>('initializing');
   const [error, setError] = useState<string | null>(null);
 
+  // Enhanced error handling
+  const handleError = (error: Error, context: string) => {
+    appLogger.error(`Error in ${context}`, error);
+    setError(`${context}: ${error.message}`);
+    setAppState('error');
+  };
+
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        console.log('🚀 Initializing application...');
+        appLogger.info('Initializing application...');
 
         // First try synchronous detection
-        console.log('🔍 Checking synchronous Tauri detection...');
+        appLogger.debug('Checking synchronous Tauri detection...');
         let env = TAURI_ENV;
 
         // If synchronous detection suggests we're in Tauri, try async confirmation
         if (env.isTauri) {
-          console.log('✅ Synchronous detection found Tauri environment, confirming...');
+          tauriLogger.info('Synchronous detection found Tauri environment, confirming...');
           try {
             // Try async detection with shorter timeout
             const asyncEnv = await Promise.race([
@@ -40,22 +51,22 @@ const App: React.FC = () => {
             ]);
             env = asyncEnv;
           } catch (error) {
-            console.warn('⚠️ Async detection failed, using synchronous result:', error);
+            tauriLogger.warn('Async detection failed, using synchronous result', error);
           }
         }
 
         if (env.isBrowser) {
-          console.warn('🌐 Running in browser mode.');
+          appLogger.warn('Running in browser mode.');
           setAppState('browser_mode');
           return;
         }
 
         if (!env.hasInvoke) {
-          console.warn('⚠️ Tauri environment detected, but invoke is not ready yet. Proceeding with diagnostics...');
+          tauriLogger.warn('Tauri environment detected, but invoke is not ready yet. Proceeding with diagnostics...');
           // Don't error out immediately, let diagnostics handle it
         }
 
-        console.log('✅ Tauri environment confirmed. Running diagnostics...');
+        tauriLogger.info('Tauri environment confirmed. Running diagnostics...');
         setAppState('diagnostics');
 
         // Fetch initial data from backend
@@ -68,9 +79,8 @@ const App: React.FC = () => {
         await invoke('log_message', { message: 'App environment initialized.' });
         
       } catch (err) {
-        console.error('🚨 Failed to initialize app:', err);
-        setError(err instanceof Error ? err.message : String(err));
-        setAppState('error');
+        const error = err instanceof Error ? err : new Error(String(err));
+        handleError(error, 'App Initialization');
       }
     };
 
@@ -104,8 +114,8 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (appState) {
       case 'initializing':
-        return <div className="loading-screen"><h2>Initializing...</h2></div>;
-      
+        return <AppInitializingLoader />;
+
       case 'diagnostics':
         return (
           <StartupDiagnostic
@@ -127,22 +137,38 @@ const App: React.FC = () => {
         return <BrowserModeBlocker onIgnoreWarning={() => setAppState('ready')} />;
 
       case 'error':
-        return <div className="error-screen"><h2>Error: {error}</h2></div>;
+        return (
+          <FullScreenError
+            title="Application Error"
+            message={error || 'An unexpected error occurred'}
+            onRetry={() => {
+              setError(null);
+              setAppState('initializing');
+            }}
+          />
+        );
 
       default:
-        return <div className="error-screen"><h2>Invalid State</h2></div>;
+        return (
+          <FullScreenError
+            title="Invalid Application State"
+            message="The application is in an unknown state. Please reload the app."
+          />
+        );
     }
   };
 
   return (
-    <div className={cn(
-      'h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100',
-      'transition-colors duration-300'
-    )}>
-      <main className="h-full">
-        {renderContent()}
-      </main>
-    </div>
+    <ErrorBoundary>
+      <div className={cn(
+        'h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100',
+        'transition-colors duration-300'
+      )}>
+        <main className="h-full">
+          {renderContent()}
+        </main>
+      </div>
+    </ErrorBoundary>
   );
 };
 

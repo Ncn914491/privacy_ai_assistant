@@ -66,10 +66,19 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
           if (isReady) {
             updateStepStatus('ollama', 'success', { details: 'Ollama service is active.' });
             return true;
+          } else {
+            updateStepStatus('ollama', 'error', { 
+              error: 'Ollama service not responding.', 
+              details: 'Service may be offline or starting up. Please ensure Ollama is running on port 11434.' 
+            });
+            return false;
           }
-          throw new Error('Ollama service not found.');
         } catch (error) {
-          updateStepStatus('ollama', 'error', { error: 'Ollama not running.', details: 'Please start the Ollama service and retry.' });
+          console.error('❌ Ollama check failed:', error);
+          updateStepStatus('ollama', 'error', { 
+            error: 'Ollama check failed.', 
+            details: `Error: ${error}. Please start the Ollama service and retry.` 
+          });
           return false;
         }
       },
@@ -82,14 +91,40 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
       critical: true,
       runCheck: async () => {
         try {
+          // Add a longer timeout and retry logic for model loading
+          console.log('🧪 Testing Gemma 3n model...');
+
+          // First, warm up the model with a simple request
+          try {
+            const warmupResult = await invoke('test_gemma_model');
+            if (warmupResult) {
+              updateStepStatus('gemma', 'success', { details: 'Gemma 3n model is responsive.' });
+              return true;
+            }
+          } catch (warmupError) {
+            console.warn('⚠️ First attempt failed, retrying...', warmupError);
+          }
+
+          // Retry after a brief delay to allow model loading
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
           const isReady = await invoke('test_gemma_model');
           if (isReady) {
-            updateStepStatus('gemma', 'success', { details: 'Gemma 3n model is responsive.' });
+            updateStepStatus('gemma', 'success', { details: 'Gemma 3n model is responsive (after retry).' });
             return true;
+          } else {
+            updateStepStatus('gemma', 'error', {
+              error: 'Gemma 3n model not responding.',
+              details: 'Model may not be installed. Run `ollama pull gemma3n:latest` and retry.'
+            });
+            return false;
           }
-          throw new Error('Model did not respond correctly.');
         } catch (error) {
-          updateStepStatus('gemma', 'error', { error: 'Gemma 3n model not found.', details: 'Run `ollama pull gemma3n` and retry.' });
+          console.error('❌ Gemma model check failed:', error);
+          updateStepStatus('gemma', 'error', {
+            error: 'Gemma 3n model check failed.',
+            details: `Error: ${error}. Ensure model is installed with 'ollama pull gemma3n:latest'.`
+          });
           return false;
         }
       },
@@ -154,6 +189,7 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
           </h2>
           <div className="flex items-center space-x-2">
             <button
+              type="button"
               onClick={() => setShowDetails(!showDetails)}
               className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               title="Toggle details"
@@ -161,6 +197,7 @@ export const StartupDiagnostic: React.FC<StartupDiagnosticProps> = ({
               <Settings className="w-4 h-4" />
             </button>
             <button
+              type="button"
               onClick={runDiagnostics}
               disabled={isRunning}
               className="inline-flex items-center px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"

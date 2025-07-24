@@ -47,8 +47,16 @@ export const usePythonBackendStreaming = (): UsePythonBackendStreamingReturn => 
         
         const ws = new WebSocket(PYTHON_BACKEND_WS_URL);
         
+        // Set connection timeout
+        const connectionTimeout = setTimeout(() => {
+          console.error('❌ WebSocket connection timeout');
+          ws.close();
+          reject(new Error('Connection timeout - please check if the backend server is running'));
+        }, 10000); // 10 second timeout
+
         ws.onopen = () => {
           console.log('✅ Streaming WebSocket connected to Python backend');
+          clearTimeout(connectionTimeout);
           websocketRef.current = ws;
           resolve(ws);
         };
@@ -60,13 +68,17 @@ export const usePythonBackendStreaming = (): UsePythonBackendStreamingReturn => 
             
             switch (message.type) {
               case 'chunk':
-                if (message.data && onChunkRef.current) {
-                  onChunkRef.current(message.data);
-                }
-                setStreamingState(prev => ({
-                  ...prev,
-                  streamedContent: prev.streamedContent + message.data
-                }));
+                setStreamingState(prev => {
+                  const newContent = prev.streamedContent + (message.data || '');
+                  // Call onChunk with the full accumulated content, not just the chunk
+                  if (onChunkRef.current) {
+                    onChunkRef.current(newContent);
+                  }
+                  return {
+                    ...prev,
+                    streamedContent: newContent
+                  };
+                });
                 break;
               case 'complete':
                 console.log('✅ Streaming completed');
@@ -102,7 +114,8 @@ export const usePythonBackendStreaming = (): UsePythonBackendStreamingReturn => 
         
         ws.onerror = (error) => {
           console.error('❌ Streaming WebSocket error:', error);
-          const errorMsg = 'WebSocket connection error';
+          clearTimeout(connectionTimeout);
+          const errorMsg = 'WebSocket connection failed. Please check if the backend server is running on port 8000.';
           setStreamingState(prev => ({
             ...prev,
             isStreaming: false,
@@ -113,11 +126,20 @@ export const usePythonBackendStreaming = (): UsePythonBackendStreamingReturn => 
           }
           reject(new Error(errorMsg));
         };
-        
-        ws.onclose = () => {
-          console.log('🔌 Streaming WebSocket closed');
+
+        ws.onclose = (event) => {
+          console.log('🔌 Streaming WebSocket closed:', event.code, event.reason);
+          clearTimeout(connectionTimeout);
           setStreamingState(prev => ({ ...prev, isStreaming: false }));
           websocketRef.current = null;
+
+          // If connection was closed unexpectedly, provide helpful error
+          if (event.code !== 1000 && event.code !== 1001) {
+            const errorMsg = `WebSocket closed unexpectedly (code: ${event.code}). Backend may have stopped.`;
+            if (onErrorRef.current) {
+              onErrorRef.current(errorMsg);
+            }
+          }
         };
         
       } catch (e) {

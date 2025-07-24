@@ -84,7 +84,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
   const canSend = currentInput.trim().length > 0 && !disabled && !isLoading;
 
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+    <div className="sticky bottom-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-10">
       <div className="max-w-4xl mx-auto p-4">
         {/* Character Counter */}
         {charCount > maxChars * 0.8 && (

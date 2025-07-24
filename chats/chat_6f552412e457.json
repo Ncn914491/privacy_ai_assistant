@@ -1,0 +1,24 @@
+{
+  "id": "chat_6f552412e457",
+  "title": "Sidebar Test Chat",
+  "messages": [
+    {
+      "id": "msg_ace15c2dae50",
+      "content": "It looks like you're trying to test the sidebar functionality! This conversation just started, so I don't see any content in the sidebar yet. Would you like me to simulate some responses or provide more context for the test?",
+      "role": "assistant",
+      "timestamp": "2025-07-23T17:08:41.139222+00:00",
+      "token_count": 56,
+      "metadata": null
+    }
+  ],
+  "created_at": "2025-07-23T17:08:16.185169+00:00",
+  "updated_at": "2025-07-23T17:08:41.139280+00:00",
+  "metadata": {
+    "model": "llama3.1:8b",
+    "token_count": 56,
+    "message_count": 1,
+    "last_activity": "2025-07-23T17:08:41.139264+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

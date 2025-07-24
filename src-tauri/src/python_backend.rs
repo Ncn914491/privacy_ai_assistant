@@ -9,7 +9,7 @@ use tokio::time::timeout;
 
 // Python backend configuration
 const PYTHON_BACKEND_URL: &str = "http://127.0.0.1:8000";
-const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 
 // Global backend process handle
 static BACKEND_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
@@ -124,7 +124,7 @@ pub async fn check_python_backend() -> Result<BackendHealthResponse, String> {
     
     let client = reqwest::Client::new();
     
-    match timeout(Duration::from_secs(5), client.get(&format!("{}/health", PYTHON_BACKEND_URL)).send()).await {
+    match timeout(Duration::from_secs(3), client.get(&format!("{}/health", PYTHON_BACKEND_URL)).send()).await {
         Ok(Ok(response)) => {
             if response.status().is_success() {
                 match response.json::<BackendHealthResponse>().await {

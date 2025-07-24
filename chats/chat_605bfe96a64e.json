@@ -1,0 +1,15 @@
+{
+  "id": "chat_605bfe96a64e",
+  "title": "Comprehensive Fix Test",
+  "messages": [],
+  "created_at": "2025-07-23T18:01:53.961894+00:00",
+  "updated_at": "2025-07-23T18:01:53.961969+00:00",
+  "metadata": {
+    "model": "gemma3n:latest",
+    "token_count": 0,
+    "message_count": 0,
+    "last_activity": "2025-07-23T18:01:53.961959+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

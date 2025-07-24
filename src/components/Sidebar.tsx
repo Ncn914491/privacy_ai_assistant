@@ -80,9 +80,19 @@ const ChatItem: React.FC<ChatItemProps> = ({
     }
   };
 
-  const formatLastActivity = (date: Date) => {
+  const formatLastActivity = (date: Date | null | undefined) => {
+    if (!date) {
+      return 'No activity';
+    }
+
+    // Ensure we have a valid Date object
+    const activityDate = date instanceof Date ? date : new Date(date);
+    if (isNaN(activityDate.getTime())) {
+      return 'Invalid date';
+    }
+
     const now = new Date();
-    const diff = now.getTime() - date.getTime();
+    const diff = now.getTime() - activityDate.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
     if (days === 0) {
@@ -92,7 +102,7 @@ const ChatItem: React.FC<ChatItemProps> = ({
     } else if (days < 7) {
       return `${days} days ago`;
     } else {
-      return date.toLocaleDateString();
+      return activityDate.toLocaleDateString();
     }
   };
 

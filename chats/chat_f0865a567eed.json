@@ -1,0 +1,24 @@
+{
+  "id": "chat_f0865a567eed",
+  "title": "Desktop Integration Test",
+  "messages": [
+    {
+      "id": "msg_1e4eb12970ec",
+      "content": "Desktop integration test successful!",
+      "role": "assistant",
+      "timestamp": "2025-07-23T16:57:44.368346+00:00",
+      "token_count": 9,
+      "metadata": null
+    }
+  ],
+  "created_at": "2025-07-23T16:57:26.848879+00:00",
+  "updated_at": "2025-07-23T16:57:44.368507+00:00",
+  "metadata": {
+    "model": "llama3.1:8b",
+    "token_count": 9,
+    "message_count": 1,
+    "last_activity": "2025-07-23T16:57:44.368485+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

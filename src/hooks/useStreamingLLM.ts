@@ -1,201 +1,181 @@
-import { useState, useCallback, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { useState, useRef, useCallback } from 'react';
 
 interface StreamingState {
   isStreaming: boolean;
-  currentStreamId: string | null;
   streamedContent: string;
   error: string | null;
+  currentStreamId: string | null;
 }
 
 interface UseStreamingLLMReturn {
   streamingState: StreamingState;
-  startStream: (prompt: string, onChunk?: (chunk: string) => void, onComplete?: () => void, onError?: (error: string) => void) => Promise<void>;
+  startStream: (prompt: string, onChunk?: (chunk: string) => void, onComplete?: (fullContent: string) => void) => Promise<string>;
   stopStream: () => Promise<void>;
-  resetStream: () => void;
 }
+
+const PYTHON_BACKEND_WS_URL = 'ws://127.0.0.1:8000/llm/stream';
 
 export const useStreamingLLM = (): UseStreamingLLMReturn => {
   const [streamingState, setStreamingState] = useState<StreamingState>({
     isStreaming: false,
-    currentStreamId: null,
     streamedContent: '',
     error: null,
+    currentStreamId: null,
   });
 
-  const unlistenRef = useRef<(() => void) | null>(null);
+  const websocketRef = useRef<WebSocket | null>(null);
+  const currentStreamIdRef = useRef<string | null>(null);
+
+  const stopStream = useCallback(async (): Promise<void> => {
+    console.log('⏹️ [STREAMING] Stopping stream...');
+    
+    if (websocketRef.current) {
+      websocketRef.current.close();
+      websocketRef.current = null;
+    }
+
+    setStreamingState(prev => ({
+      ...prev,
+      isStreaming: false,
+      currentStreamId: null,
+    }));
+
+    currentStreamIdRef.current = null;
+  }, []);
 
   const startStream = useCallback(async (
     prompt: string,
     onChunk?: (chunk: string) => void,
-    onComplete?: () => void,
-    onError?: (error: string) => void
-  ) => {
-    try {
-      console.log('🚀 Starting LLM stream for prompt:', prompt);
-      console.log('🔍 Prompt length:', prompt.length);
+    onComplete?: (fullContent: string) => void
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      console.log('🚀 [STREAMING] Starting LLM stream...');
+      
+      // Stop any existing stream
+      if (websocketRef.current) {
+        websocketRef.current.close();
+      }
 
-      // Reset state
+      const streamId = Date.now().toString();
+      currentStreamIdRef.current = streamId;
+      let fullContent = '';
+
       setStreamingState({
         isStreaming: true,
-        currentStreamId: null,
         streamedContent: '',
         error: null,
-      });
-
-      // Start the stream with detailed error handling
-      console.log('📞 Calling start_llm_stream command...');
-      const streamId = await invoke<string>('start_llm_stream', { prompt });
-      console.log('📡 Stream started successfully with ID:', streamId);
-
-      setStreamingState(prev => ({
-        ...prev,
         currentStreamId: streamId,
-      }));
-
-      // Listen for stream events
-      const eventName = `llm_stream_${streamId}`;
-      console.log('🎧 Setting up listener for event:', eventName);
-
-      const unlisten = await listen(eventName, (event) => {
-        console.log('📤 Raw stream event received:', event);
-
-        const payload = event.payload as { stream_id: string; event_type: string; data: string };
-        console.log('📤 Parsed stream event:', payload);
-
-        switch (payload.event_type) {
-          case 'chunk':
-            console.log('📝 Adding chunk to content:', payload.data);
-            setStreamingState(prev => {
-              const newContent = prev.streamedContent + payload.data;
-              console.log('📝 Updated content length:', newContent.length);
-
-              // Call the onChunk callback immediately for real-time updates
-              if (onChunk) {
-                console.log('📞 Calling onChunk callback with:', payload.data);
-                onChunk(payload.data);
-              }
-
-              return {
-                ...prev,
-                streamedContent: newContent,
-              };
-            });
-            break;
-
-          case 'complete':
-            console.log('✅ Stream completed');
-            setStreamingState(prev => ({
-              ...prev,
-              isStreaming: false,
-            }));
-
-            // Call the onComplete callback
-            if (onComplete) {
-              console.log('📞 Calling onComplete callback');
-              onComplete();
-            }
-
-            if (unlistenRef.current) {
-              unlistenRef.current();
-              unlistenRef.current = null;
-            }
-            break;
-
-          case 'error':
-            console.error('❌ Stream error:', payload.data);
-            setStreamingState(prev => ({
-              ...prev,
-              isStreaming: false,
-              error: payload.data,
-            }));
-
-            // Call the onError callback
-            if (onError) {
-              console.log('📞 Calling onError callback with:', payload.data);
-              onError(payload.data);
-            }
-
-            if (unlistenRef.current) {
-              unlistenRef.current();
-              unlistenRef.current = null;
-            }
-            break;
-
-          default:
-            console.warn('⚠️ Unknown stream event type:', payload.event_type);
-        }
       });
 
-      unlistenRef.current = unlisten;
+      try {
+        const ws = new WebSocket(PYTHON_BACKEND_WS_URL);
+        websocketRef.current = ws;
 
-    } catch (error) {
-      console.error('❌ Failed to start stream:', error);
-      console.error('❌ Error type:', typeof error);
-      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        ws.onopen = () => {
+          console.log('✅ [STREAMING] WebSocket connected');
+          
+          // Send the streaming request
+          const request = {
+            prompt,
+            model: 'gemma3n:latest'
+          };
+          
+          ws.send(JSON.stringify(request));
+        };
 
-      let errorMessage = 'Failed to start stream';
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      } else if (error && typeof error === 'object' && 'message' in error) {
-        errorMessage = String(error.message);
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('📤 [STREAMING] Received:', data);
+
+            if (data.type === 'chunk') {
+              fullContent += data.data;
+              
+              setStreamingState(prev => ({
+                ...prev,
+                streamedContent: fullContent,
+              }));
+
+              onChunk?.(data.data);
+              
+            } else if (data.type === 'complete') {
+              console.log('✅ [STREAMING] Stream completed');
+              
+              setStreamingState(prev => ({
+                ...prev,
+                isStreaming: false,
+                currentStreamId: null,
+              }));
+
+              onComplete?.(fullContent);
+              resolve(fullContent);
+              
+            } else if (data.type === 'error') {
+              console.error('❌ [STREAMING] Stream error:', data.data);
+              
+              setStreamingState(prev => ({
+                ...prev,
+                isStreaming: false,
+                error: data.data,
+                currentStreamId: null,
+              }));
+
+              reject(new Error(data.data));
+            }
+          } catch (e) {
+            console.error('❌ [STREAMING] Failed to parse message:', e);
+            setStreamingState(prev => ({
+              ...prev,
+              error: 'Failed to parse streaming response',
+            }));
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error('❌ [STREAMING] WebSocket error:', error);
+          
+          setStreamingState(prev => ({
+            ...prev,
+            isStreaming: false,
+            error: 'WebSocket connection error',
+            currentStreamId: null,
+          }));
+
+          reject(new Error('WebSocket connection failed'));
+        };
+
+        ws.onclose = (event) => {
+          console.log('🔌 [STREAMING] WebSocket closed:', event.code, event.reason);
+          
+          if (currentStreamIdRef.current === streamId) {
+            setStreamingState(prev => ({
+              ...prev,
+              isStreaming: false,
+              currentStreamId: null,
+            }));
+          }
+
+          websocketRef.current = null;
+        };
+
+      } catch (error) {
+        console.error('❌ [STREAMING] Failed to create WebSocket:', error);
+        
+        setStreamingState(prev => ({
+          ...prev,
+          isStreaming: false,
+          error: 'Failed to create WebSocket connection',
+          currentStreamId: null,
+        }));
+
+        reject(error);
       }
-
-      console.error('❌ Final error message:', errorMessage);
-
-      setStreamingState(prev => ({
-        ...prev,
-        isStreaming: false,
-        error: errorMessage,
-      }));
-
-      // Re-throw the error so the caller can handle it
-      throw new Error(errorMessage);
-    }
-  }, []);
-
-  const stopStream = useCallback(async () => {
-    if (!streamingState.currentStreamId) return;
-
-    try {
-      console.log('⏹️ Stopping stream:', streamingState.currentStreamId);
-      await invoke('stop_llm_stream', { streamId: streamingState.currentStreamId });
-      
-      setStreamingState(prev => ({
-        ...prev,
-        isStreaming: false,
-      }));
-
-      if (unlistenRef.current) {
-        unlistenRef.current();
-        unlistenRef.current = null;
-      }
-    } catch (error) {
-      console.error('❌ Failed to stop stream:', error);
-    }
-  }, [streamingState.currentStreamId]);
-
-  const resetStream = useCallback(() => {
-    setStreamingState({
-      isStreaming: false,
-      currentStreamId: null,
-      streamedContent: '',
-      error: null,
     });
-
-    if (unlistenRef.current) {
-      unlistenRef.current();
-      unlistenRef.current = null;
-    }
   }, []);
 
   return {
     streamingState,
     startStream,
     stopStream,
-    resetStream,
   };
 };

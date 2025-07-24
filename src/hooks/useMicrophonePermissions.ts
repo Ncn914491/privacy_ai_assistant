@@ -6,6 +6,7 @@ export interface UseMicrophonePermissionsReturn {
   error: string | null;
   requestMicrophonePermission: () => Promise<boolean>;
   checkPermissionStatus: () => Promise<void>;
+  hasPermission: boolean;
 }
 
 export const useMicrophonePermissions = (): UseMicrophonePermissionsReturn => {
@@ -104,6 +105,7 @@ export const useMicrophonePermissions = (): UseMicrophonePermissionsReturn => {
     isRequestingPermission,
     error,
     requestMicrophonePermission,
-    checkPermissionStatus
+    checkPermissionStatus,
+    hasPermission: permissionStatus === 'granted'
   };
 };
