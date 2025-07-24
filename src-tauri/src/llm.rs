@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use log::{info, error, warn};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use futures_util::StreamExt;
 
 // Configuration constants
 const OLLAMA_BASE_URL: &str = "http://localhost:11434";
@@ -531,7 +532,8 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
         return Err(error_msg);
     }
 
-    // Read the response text
+    // Read the response text (for now, we'll use the existing approach)
+    // TODO: Implement true streaming when reqwest streaming is properly configured
     info!("📖 Reading response text from Ollama...");
     let response_text = response.text().await
         .map_err(|e| {
@@ -546,14 +548,14 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
               response_text.clone()
           });
 
-    // Parse the response and simulate streaming
+    // Parse the response and simulate streaming with faster chunks
     match serde_json::from_str::<OllamaResponse>(&response_text) {
         Ok(ollama_response) => {
             info!("✅ Successfully parsed Ollama response");
             if !ollama_response.response.is_empty() {
                 info!("📝 Response content (length: {}): {}", ollama_response.response.len(), ollama_response.response);
 
-                // Simulate streaming by sending the response in chunks
+                // Simulate streaming by sending the response in smaller, faster chunks
                 let words: Vec<&str> = ollama_response.response.split_whitespace().collect();
                 let chunk_size = 1; // Send 1 word at a time for better streaming effect
 
@@ -564,8 +566,8 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
                     info!("📤 Emitting chunk {}: '{}'", i + 1, chunk_text);
                     emit_stream_chunk(app_handle, stream_id, &chunk_text).await;
 
-                    // Shorter delay for more responsive streaming
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    // Much shorter delay for more responsive streaming
+                    tokio::time::sleep(Duration::from_millis(25)).await;
                 }
 
                 info!("✅ All chunks emitted, sending completion signal");

@@ -10,6 +10,8 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { invoke } from '@tauri-apps/api/core';
+import { TAURI_ENV } from '../utils/tauriDetection';
 
 interface HardwareStatusProps {
   className?: string;
@@ -50,29 +52,48 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
       setIsLoading(true);
       setError(null);
 
-      console.log('🔧 Loading hardware information from backend...');
+      console.log('🔧 Loading hardware information...');
 
-      const response = await fetch('http://127.0.0.1:8000/hardware/info', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      // Check if we're in Tauri environment
+      if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
+        console.log('🔧 Using Tauri command for hardware detection...');
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+        const response = await invoke('get_hardware_info') as any;
+        console.log('🔧 Hardware data received from Tauri:', response);
 
-      const data = await response.json();
-      console.log('🔧 Hardware data received:', data);
-
-      if (data.success && data.data) {
-        setHardwareData(data.data);
-        console.log('✅ Hardware data loaded successfully');
+        if (response.success && response.data) {
+          setHardwareData(response.data);
+          console.log('✅ Hardware data loaded successfully via Tauri');
+        } else {
+          const errorMsg = response.error || 'Failed to load hardware information';
+          console.error('❌ Hardware data error:', errorMsg);
+          setError(errorMsg);
+        }
       } else {
-        const errorMsg = data.error || 'Failed to load hardware information';
-        console.error('❌ Hardware data error:', errorMsg);
-        setError(errorMsg);
+        console.log('🔧 Using HTTP fallback for hardware detection...');
+
+        const response = await fetch('http://127.0.0.1:8000/hardware/info', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('🔧 Hardware data received via HTTP:', data);
+
+        if (data.success && data.data) {
+          setHardwareData(data.data);
+          console.log('✅ Hardware data loaded successfully via HTTP');
+        } else {
+          const errorMsg = data.error || 'Failed to load hardware information';
+          console.error('❌ Hardware data error:', errorMsg);
+          setError(errorMsg);
+        }
       }
     } catch (err) {
       console.error('❌ Failed to load hardware info:', err);
@@ -88,7 +109,18 @@ const HardwareStatusBadge: React.FC<HardwareStatusProps> = ({
       setIsRefreshing(true);
       console.log('🔄 Refreshing hardware detection...');
 
-      // Just reload the hardware info - the backend will refresh automatically
+      // If in Tauri environment, try to use the refresh command first
+      if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
+        try {
+          console.log('🔄 Using Tauri refresh command...');
+          await invoke('refresh_hardware_detection');
+          console.log('✅ Tauri hardware refresh completed');
+        } catch (refreshErr) {
+          console.warn('⚠️ Tauri refresh failed, falling back to reload:', refreshErr);
+        }
+      }
+
+      // Reload the hardware info
       await loadHardwareInfo();
 
       console.log('✅ Hardware refresh completed');

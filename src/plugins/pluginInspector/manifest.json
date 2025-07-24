@@ -1,0 +1,10 @@
+{
+  "name": "pluginInspector",
+  "description": "Lists all registered plugins and their capabilities by reading manifests and providing plugin information",
+  "version": "1.0.0",
+  "author": "Privacy AI Assistant",
+  "keywords": ["plugins", "list", "help", "commands", "available"],
+  "triggerWords": ["list plugins", "show plugins", "available plugins", "plugin help", "what can you do"],
+  "category": "system",
+  "permissions": []
+}

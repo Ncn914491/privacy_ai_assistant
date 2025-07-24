@@ -1,0 +1,10 @@
+{
+  "name": "noteTaker",
+  "description": "Save and retrieve timestamped notes with search functionality using local JSON storage",
+  "version": "1.0.0",
+  "author": "Privacy AI Assistant",
+  "keywords": ["note", "save", "write", "remember", "record"],
+  "triggerWords": ["note", "save note", "take note", "remember", "write down", "record"],
+  "category": "productivity",
+  "permissions": ["file:read", "file:write"]
+}

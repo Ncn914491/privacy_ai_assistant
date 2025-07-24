@@ -103,9 +103,11 @@ export interface ChatSessionMetadata {
 export interface ChatSessionSummary {
   id: string;
   title: string;
+  lastMessage?: string | null;
   messageCount: number;
   lastActivity: Date;
   createdAt: Date;
+  updatedAt: Date;
   isArchived?: boolean;
 }
 
@@ -170,4 +172,71 @@ export interface ConversationContext {
   contextWindow: ContextWindow;
   systemPrompt?: string;
   model: string;
+}
+
+// ===== PLUGIN SYSTEM TYPES =====
+
+export interface PluginManifest {
+  name: string;
+  description: string;
+  version: string;
+  author?: string;
+  keywords: string[];
+  triggerWords: string[];
+  category: 'productivity' | 'utility' | 'system' | 'file' | 'other';
+  permissions?: string[];
+  examples?: string[];
+}
+
+export interface PluginResult {
+  success: boolean;
+  data?: any;
+  message?: string;
+  error?: string;
+}
+
+export interface Plugin {
+  manifest: PluginManifest;
+  run: (input: string, context?: PluginContext) => Promise<PluginResult>;
+}
+
+export interface PluginContext {
+  chatId?: string;
+  userId?: string;
+  timestamp: Date;
+  workingDirectory?: string;
+}
+
+export interface PluginRegistry {
+  [pluginName: string]: Plugin;
+}
+
+// ===== LLM ROUTING TYPES =====
+
+export type LLMProvider = 'local' | 'online';
+export type LLMModel = 'gemma3n' | 'gemini-api';
+
+export interface LLMConfig {
+  provider: LLMProvider;
+  model: LLMModel;
+  apiKey?: string;
+  endpoint?: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+export interface LLMRoutingPreferences {
+  preferredProvider: LLMProvider;
+  fallbackProvider: LLMProvider;
+  autoSwitchOnOffline: boolean;
+  useOnlineForComplexQueries: boolean;
+  geminiApiKey?: string;
+  selectedOnlineModel?: string;
+  selectedOfflineModel?: string;
+}
+
+export interface NetworkStatus {
+  isOnline: boolean;
+  lastChecked: Date;
+  latency?: number;
 }

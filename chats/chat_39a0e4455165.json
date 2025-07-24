@@ -1,0 +1,15 @@
+{
+  "id": "chat_39a0e4455165",
+  "title": "New Chat 07/24 20:36",
+  "messages": [],
+  "created_at": "2025-07-24T15:06:46.797949+00:00",
+  "updated_at": "2025-07-24T15:06:46.800838+00:00",
+  "metadata": {
+    "model": "gemma3n:latest",
+    "token_count": 0,
+    "message_count": 0,
+    "last_activity": "2025-07-24T15:06:46.800734+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

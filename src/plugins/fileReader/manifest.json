@@ -1,0 +1,10 @@
+{
+  "name": "fileReader",
+  "description": "Read content from local .txt and .md files with support for file browsing",
+  "version": "1.0.0",
+  "author": "Privacy AI Assistant",
+  "keywords": ["read", "file", "open", "text", "markdown"],
+  "triggerWords": ["read file", "open file", "show file", "file content", "read"],
+  "category": "file",
+  "permissions": ["file:read", "fs:read"]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "fileWriter",
+  "description": "Write text content to local files with support for creating new files and appending to existing ones",
+  "version": "1.0.0",
+  "author": "Privacy AI Assistant",
+  "keywords": ["write", "save", "create", "file", "export"],
+  "triggerWords": ["write file", "save to file", "create file", "export", "write to"],
+  "category": "file",
+  "permissions": ["file:write", "fs:write"]
+}

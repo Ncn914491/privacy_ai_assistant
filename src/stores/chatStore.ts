@@ -13,7 +13,10 @@ import {
   ChatSession,
   ChatSessionSummary,
   MultiChatState,
-  ChatSessionActions
+  ChatSessionActions,
+  LLMRoutingPreferences,
+  LLMProvider,
+  PluginResult
 } from '../types';
 
 // Generate unique ID for messages
@@ -45,6 +48,17 @@ const defaultPreferences: UserPreferences = {
   autoSave: true,
 };
 
+// Default LLM routing preferences
+const defaultLLMPreferences: LLMRoutingPreferences = {
+  preferredProvider: 'local',
+  fallbackProvider: 'online',
+  autoSwitchOnOffline: true,
+  useOnlineForComplexQueries: false,
+  geminiApiKey: 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM',
+  selectedOnlineModel: 'gemini-2.5-flash',
+  selectedOfflineModel: 'gemma3n:latest'
+};
+
 // Chat store
 interface ChatStore extends ChatState, ChatActions {}
 
@@ -64,9 +78,50 @@ export const useChatStore = create<ChatStore>()(
           timestamp: new Date(),
         };
 
-        set((state) => ({
-          messages: [...state.messages, newMessage],
-        }));
+        set((state) => {
+          const updatedMessages = [...state.messages, newMessage];
+
+          // Update the active chat session if it exists
+          const activeChatId = state.activeChatId;
+          let updatedChatSessions = state.chatSessions;
+          let updatedChatSummaries = state.chatSummaries;
+
+          if (activeChatId && state.chatSessions[activeChatId]) {
+            const updatedSession = {
+              ...state.chatSessions[activeChatId],
+              messages: updatedMessages,
+              updatedAt: new Date(),
+              metadata: {
+                ...state.chatSessions[activeChatId].metadata,
+                messageCount: updatedMessages.length,
+                lastActivity: new Date()
+              }
+            };
+
+            updatedChatSessions = {
+              ...state.chatSessions,
+              [activeChatId]: updatedSession
+            };
+
+            // Update chat summary
+            updatedChatSummaries = state.chatSummaries.map(summary =>
+              summary.id === activeChatId
+                ? {
+                    ...summary,
+                    lastMessage: content.substring(0, 100),
+                    messageCount: updatedMessages.length,
+                    updatedAt: new Date()
+                  }
+                : summary
+            );
+          }
+
+          return {
+            messages: updatedMessages,
+            chatSessions: updatedChatSessions,
+            chatSummaries: updatedChatSummaries
+          };
+        });
       },
 
       updateMessage: (id: string, updates: Partial<Message>) => {
@@ -114,6 +169,17 @@ interface AppStore extends AppState, PreferenceActions {
   setSystemInfo: (info: SystemInfo) => void;
   setAppVersion: (version: AppVersion) => void;
   setInitialized: (initialized: boolean) => void;
+
+  // LLM routing preferences
+  llmPreferences: LLMRoutingPreferences;
+  setLLMPreferences: (preferences: Partial<LLMRoutingPreferences>) => void;
+  setPreferredProvider: (provider: LLMProvider) => void;
+  toggleAutoSwitchOnOffline: () => void;
+  toggleUseOnlineForComplexQueries: () => void;
+
+  // Plugin system state
+  pluginsEnabled: boolean;
+  setPluginsEnabled: (enabled: boolean) => void;
 }
 
 export const useAppStore = create<AppStore>()(
@@ -123,6 +189,8 @@ export const useAppStore = create<AppStore>()(
       systemInfo: null,
       appVersion: null,
       preferences: defaultPreferences,
+      llmPreferences: defaultLLMPreferences,
+      pluginsEnabled: true,
 
       setSystemInfo: (info: SystemInfo) => {
         set({ systemInfo: info });
@@ -184,11 +252,49 @@ export const useAppStore = create<AppStore>()(
       resetPreferences: () => {
         set({ preferences: defaultPreferences });
       },
+
+      // LLM routing preferences actions
+      setLLMPreferences: (preferences: Partial<LLMRoutingPreferences>) => {
+        set((state) => ({
+          llmPreferences: { ...state.llmPreferences, ...preferences }
+        }));
+      },
+
+      setPreferredProvider: (provider: LLMProvider) => {
+        set((state) => ({
+          llmPreferences: { ...state.llmPreferences, preferredProvider: provider }
+        }));
+      },
+
+      toggleAutoSwitchOnOffline: () => {
+        set((state) => ({
+          llmPreferences: {
+            ...state.llmPreferences,
+            autoSwitchOnOffline: !state.llmPreferences.autoSwitchOnOffline
+          }
+        }));
+      },
+
+      toggleUseOnlineForComplexQueries: () => {
+        set((state) => ({
+          llmPreferences: {
+            ...state.llmPreferences,
+            useOnlineForComplexQueries: !state.llmPreferences.useOnlineForComplexQueries
+          }
+        }));
+      },
+
+      // Plugin system actions
+      setPluginsEnabled: (enabled: boolean) => {
+        set({ pluginsEnabled: enabled });
+      },
     }),
     {
       name: 'app-storage',
       partialize: (state) => ({
         preferences: state.preferences,
+        llmPreferences: state.llmPreferences,
+        pluginsEnabled: state.pluginsEnabled,
       }),
     }
   )
@@ -196,7 +302,13 @@ export const useAppStore = create<AppStore>()(
 
 // ===== MULTI-CHAT SESSION STORE =====
 
-interface MultiChatStore extends MultiChatState, ChatActions, ChatSessionActions {}
+interface MultiChatStore extends MultiChatState, ChatActions, ChatSessionActions {
+  // Plugin execution
+  executePlugin: (input: string) => Promise<PluginResult | null>;
+
+  // Enhanced LLM response generation with routing
+  generateLLMResponse: (prompt: string, forceProvider?: LLMProvider) => Promise<string>;
+}
 
 export const useMultiChatStore = create<MultiChatStore>()(
   persist(
@@ -218,7 +330,7 @@ export const useMultiChatStore = create<MultiChatStore>()(
         const activeChatId = state.activeChatId;
 
         if (!activeChatId) {
-          console.warn('No active chat session');
+          console.warn('❌ No active chat session for adding message');
           return;
         }
 
@@ -229,12 +341,27 @@ export const useMultiChatStore = create<MultiChatStore>()(
           timestamp: new Date(),
         };
 
+        console.log(`📝 Adding ${role} message to chat ${activeChatId}: ${content.substring(0, 50)}...`);
+
         set((state) => {
-          const updatedSession = state.chatSessions[activeChatId];
-          if (updatedSession) {
-            updatedSession.messages = [...updatedSession.messages, newMessage];
-            updatedSession.updatedAt = new Date();
+          const currentSession = state.chatSessions[activeChatId];
+          if (!currentSession) {
+            console.error(`❌ Chat session ${activeChatId} not found when adding message`);
+            return state; // Don't update if session doesn't exist
           }
+
+          const updatedSession = {
+            ...currentSession,
+            messages: [...currentSession.messages, newMessage],
+            updatedAt: new Date(),
+            metadata: {
+              ...currentSession.metadata,
+              messageCount: currentSession.messages.length + 1,
+              lastActivity: new Date()
+            }
+          };
+
+          console.log(`✅ Updated session ${activeChatId} with ${updatedSession.messages.length} messages`);
 
           return {
             messages: [...state.messages, newMessage],
@@ -365,14 +492,61 @@ export const useMultiChatStore = create<MultiChatStore>()(
       // Multi-chat session actions
       createNewChat: async (title?: string): Promise<string> => {
         try {
-          const response = await invoke<{chat_id: string, title: string, success: boolean, error?: string}>('create_chat_session', {
-            title: title || undefined
-          });
+          // Try backend first, then fallback to local storage
+          try {
+            const response = await invoke<{chat_id: string, title: string, success: boolean, error?: string}>('create_chat_session', {
+              title: title || undefined
+            });
 
-          if (response.success) {
+            if (response.success) {
+              const newSession: ChatSession = {
+                id: response.chat_id,
+                title: response.title,
+                messages: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                metadata: {
+                  model: 'gemma3n:latest',
+                  tokenCount: 0,
+                  messageCount: 0,
+                  lastActivity: new Date(),
+                  tags: [],
+                  isArchived: false
+                }
+              };
+
+              set((state) => ({
+                chatSessions: {
+                  ...state.chatSessions,
+                  [response.chat_id]: newSession
+                },
+                activeChatId: response.chat_id,
+                messages: [],
+                currentInput: ''
+              }));
+
+              // Refresh chat list
+              await get().loadChatSessions();
+
+              return response.chat_id;
+            } else {
+              throw new Error(response.error || 'Backend failed to create chat session');
+            }
+          } catch (backendError) {
+            console.warn('Backend unavailable, using local fallback:', backendError);
+
+            // Fallback: Create chat session locally
+            const chatId = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const chatTitle = title || `New Chat ${new Date().toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}`;
+
             const newSession: ChatSession = {
-              id: response.chat_id,
-              title: response.title,
+              id: chatId,
+              title: chatTitle,
               messages: [],
               createdAt: new Date(),
               updatedAt: new Date(),
@@ -389,19 +563,27 @@ export const useMultiChatStore = create<MultiChatStore>()(
             set((state) => ({
               chatSessions: {
                 ...state.chatSessions,
-                [response.chat_id]: newSession
+                [chatId]: newSession
               },
-              activeChatId: response.chat_id,
+              activeChatId: chatId,
               messages: [],
-              currentInput: ''
+              currentInput: '',
+              chatSummaries: [
+                {
+                  id: chatId,
+                  title: chatTitle,
+                  lastMessage: null,
+                  messageCount: 0,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                  lastActivity: new Date()
+                },
+                ...state.chatSummaries
+              ]
             }));
 
-            // Refresh chat list
-            await get().loadChatSessions();
-
-            return response.chat_id;
-          } else {
-            throw new Error(response.error || 'Failed to create chat session');
+            console.log(`✅ Created local chat session: ${chatId}`);
+            return chatId;
           }
         } catch (error) {
           console.error('Failed to create new chat:', error);
@@ -412,33 +594,81 @@ export const useMultiChatStore = create<MultiChatStore>()(
 
       switchToChat: async (chatId: string): Promise<void> => {
         try {
-          // Load session from backend if not in memory
+          console.log(`🔄 Switching to chat: ${chatId}`);
+
+          // First check if session is already in memory (from persistence)
           let session = get().chatSessions[chatId];
 
-          if (!session) {
-            const response = await invoke<{session: ChatSession | null, success: boolean, error?: string}>('get_chat_session', {
-              chatId
-            });
+          if (session) {
+            console.log(`✅ Found session in memory with ${session.messages.length} messages`);
+          } else {
+            console.log(`🔍 Session not in memory, attempting to load from backend...`);
 
-            if (response.success && response.session) {
-              session = {
-                ...response.session,
-                createdAt: new Date(response.session.createdAt),
-                updatedAt: new Date(response.session.updatedAt),
-                messages: response.session.messages.map(msg => ({
-                  ...msg,
-                  timestamp: new Date(msg.timestamp)
-                }))
-              };
+            try {
+              const response = await invoke<{session: ChatSession | null, success: boolean, error?: string}>('get_chat_session', {
+                chatId
+              });
 
-              set((state) => ({
-                chatSessions: {
-                  ...state.chatSessions,
-                  [chatId]: session!
-                }
-              }));
-            } else {
-              throw new Error(response.error || 'Chat session not found');
+              if (response.success && response.session) {
+                console.log(`✅ Loaded session from backend with ${response.session.messages.length} messages`);
+
+                session = {
+                  ...response.session,
+                  createdAt: new Date(response.session.createdAt),
+                  updatedAt: new Date(response.session.updatedAt),
+                  messages: response.session.messages.map(msg => ({
+                    ...msg,
+                    timestamp: new Date(msg.timestamp)
+                  }))
+                };
+
+                set((state) => ({
+                  chatSessions: {
+                    ...state.chatSessions,
+                    [chatId]: session!
+                  }
+                }));
+              } else {
+                throw new Error(response.error || 'Chat session not found in backend');
+              }
+            } catch (backendError) {
+              console.warn('⚠️ Backend unavailable for chat loading, checking local data:', backendError);
+
+              // Check if we have the session in local summaries but it wasn't persisted properly
+              const summary = get().chatSummaries.find(s => s.id === chatId);
+              if (summary) {
+                console.log(`⚠️ Creating empty session from summary for chat: ${summary.title}`);
+
+                // Create a basic session from summary (this will be empty but at least won't crash)
+                session = {
+                  id: chatId,
+                  title: summary.title,
+                  messages: [], // This is the issue - we're losing messages
+                  createdAt: summary.createdAt,
+                  updatedAt: summary.updatedAt,
+                  metadata: {
+                    model: 'gemma3n:latest',
+                    tokenCount: 0,
+                    messageCount: 0, // Reset to 0 since we have no messages
+                    lastActivity: summary.updatedAt,
+                    tags: [],
+                    isArchived: false
+                  }
+                };
+
+                set((state) => ({
+                  chatSessions: {
+                    ...state.chatSessions,
+                    [chatId]: session!
+                  }
+                }));
+
+                console.log(`⚠️ Created empty session for ${chatId} - messages may be lost`);
+              } else {
+                const error = 'Chat session not found locally or in backend';
+                console.error(`❌ ${error}`);
+                throw new Error(error);
+              }
             }
           }
 
@@ -448,6 +678,8 @@ export const useMultiChatStore = create<MultiChatStore>()(
             messages: session.messages,
             currentInput: ''
           });
+
+          console.log(`✅ Switched to chat session: ${chatId}`);
 
         } catch (error) {
           console.error('Failed to switch to chat:', error);
@@ -536,23 +768,85 @@ export const useMultiChatStore = create<MultiChatStore>()(
 
       loadChatSessions: async (): Promise<void> => {
         try {
-          const response = await invoke<{sessions: ChatSessionSummary[], success: boolean, error?: string}>('list_chat_sessions');
+          console.log('🔄 Loading chat sessions...');
+          const state = get();
 
-          if (response.success) {
-            const summaries = response.sessions.map(summary => ({
-              ...summary,
-              lastActivity: summary.lastActivity ? new Date(summary.lastActivity) : new Date(),
-              createdAt: summary.createdAt ? new Date(summary.createdAt) : new Date()
+          // First check if we already have local sessions from persistence
+          const existingLocalSessions = Object.keys(state.chatSessions).length;
+          console.log(`📦 Found ${existingLocalSessions} persisted chat sessions`);
+
+          // Try backend first, then fallback to local storage
+          try {
+            const response = await invoke<{sessions: ChatSessionSummary[], success: boolean, error?: string}>('list_chat_sessions');
+
+            if (response.success) {
+              const backendSummaries = response.sessions.map(summary => ({
+                ...summary,
+                lastActivity: summary.lastActivity ? new Date(summary.lastActivity) : new Date(),
+                createdAt: summary.createdAt ? new Date(summary.createdAt) : new Date(),
+                updatedAt: summary.updatedAt ? new Date(summary.updatedAt) : new Date()
+              }));
+
+              // Merge backend summaries with local sessions
+              // If we have a local session that's not in backend summaries, keep it
+              const localSummaries = Object.values(state.chatSessions).map(session => ({
+                id: session.id,
+                title: session.title,
+                lastMessage: session.messages.length > 0
+                  ? session.messages[session.messages.length - 1].content.substring(0, 100)
+                  : null,
+                messageCount: session.messages.length,
+                createdAt: session.createdAt,
+                updatedAt: session.updatedAt,
+                lastActivity: session.metadata?.lastActivity || session.updatedAt
+              }));
+
+              // Combine backend and local summaries, preferring backend data when available
+              const backendIds = new Set(backendSummaries.map(s => s.id));
+              const localOnlySummaries = localSummaries.filter(s => !backendIds.has(s.id));
+              const combinedSummaries = [...backendSummaries, ...localOnlySummaries];
+
+              // Sort by most recent activity
+              combinedSummaries.sort((a, b) =>
+                new Date(b.lastActivity || b.updatedAt).getTime() -
+                new Date(a.lastActivity || a.updatedAt).getTime()
+              );
+
+              set({ chatSummaries: combinedSummaries });
+              console.log(`✅ Loaded ${backendSummaries.length} backend + ${localOnlySummaries.length} local chat sessions`);
+              return;
+            } else {
+              throw new Error(response.error || 'Backend failed to load chat sessions');
+            }
+          } catch (backendError) {
+            console.warn('Backend unavailable, using local chat sessions:', backendError);
+
+            // Fallback: Use local chat sessions from store (these come from persistence)
+            const localSummaries = Object.values(state.chatSessions).map(session => ({
+              id: session.id,
+              title: session.title,
+              lastMessage: session.messages.length > 0
+                ? session.messages[session.messages.length - 1].content.substring(0, 100)
+                : null,
+              messageCount: session.messages.length,
+              createdAt: session.createdAt,
+              updatedAt: session.updatedAt,
+              lastActivity: session.metadata?.lastActivity || session.updatedAt
             }));
 
-            set({ chatSummaries: summaries });
-          } else {
-            throw new Error(response.error || 'Failed to load chat sessions');
+            // Sort by most recent activity
+            localSummaries.sort((a, b) =>
+              new Date(b.lastActivity || b.updatedAt).getTime() -
+              new Date(a.lastActivity || a.updatedAt).getTime()
+            );
+
+            set({ chatSummaries: localSummaries });
+            console.log(`✅ Loaded ${localSummaries.length} local chat sessions from persistence`);
           }
         } catch (error) {
           console.error('Failed to load chat sessions:', error);
           set({ error: `Failed to load chat sessions: ${error}` });
-          throw error;
+          // Don't throw error - allow app to continue with empty chat list
         }
       },
 
@@ -631,12 +925,69 @@ export const useMultiChatStore = create<MultiChatStore>()(
           console.error('Failed to generate context-aware response:', error);
           throw error;
         }
+      },
+
+      // Execute plugin with user input
+      executePlugin: async (input: string): Promise<PluginResult | null> => {
+        try {
+          const { pluginRunner } = await import('../core/agents/pluginRunner');
+
+          // Initialize plugin runner if not already done
+          await pluginRunner.initialize();
+
+          // Process the input
+          const result = await pluginRunner.processInput(input, {
+            chatId: get().activeChatId || undefined,
+            timestamp: new Date()
+          });
+
+          if (result.shouldExecutePlugin && result.pluginResult) {
+            return {
+              success: result.pluginResult.success,
+              data: result.pluginResult.data,
+              message: result.pluginResult.message,
+              error: result.pluginResult.error
+            };
+          }
+
+          return null;
+        } catch (error) {
+          console.error('Plugin execution failed:', error);
+          return {
+            success: false,
+            error: `Plugin execution failed: ${error instanceof Error ? error.message : String(error)}`
+          };
+        }
+      },
+
+      // Enhanced LLM response generation with routing
+      generateLLMResponse: async (prompt: string, forceProvider?: LLMProvider): Promise<string> => {
+        try {
+          const { llmRouter } = await import('../core/agents/llmRouter');
+
+          // Update router preferences from store
+          const appStore = useAppStore.getState();
+          llmRouter.updatePreferences(appStore.llmPreferences);
+
+          // Route the request
+          const response = await llmRouter.routeRequest(prompt, undefined, forceProvider);
+
+          if (response.success && response.response) {
+            return response.response;
+          } else {
+            throw new Error(response.error || 'LLM request failed');
+          }
+        } catch (error) {
+          console.error('LLM routing failed:', error);
+          throw error;
+        }
       }
     }),
     {
       name: 'multi-chat-storage',
       partialize: (state) => ({
         activeChatId: state.activeChatId,
+        chatSessions: state.chatSessions,
         chatSummaries: state.chatSummaries,
         currentInput: state.currentInput,
       }),

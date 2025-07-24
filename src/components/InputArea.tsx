@@ -1,213 +1,318 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic } from 'lucide-react';
-import { useChatStore } from '../stores/chatStore';
+import { Send, Mic, Wifi, WifiOff, ChevronDown } from 'lucide-react';
 import { cn } from '../utils/cn';
-import VoiceRecordingModal from './VoiceRecordingModal';
+import { useAppStore } from '../stores/chatStore';
+import { llmRouter } from '../core/agents/llmRouter';
+import { useFeatureFlags } from '../hooks/useFeatureFlags';
 
 interface InputAreaProps {
   onSendMessage: (message: string) => void;
+  onVoiceRecord?: () => void; // Made optional - voice functionality temporarily disabled
   disabled?: boolean;
+  isLoading?: boolean;
   placeholder?: string;
 }
 
-export const InputArea: React.FC<InputAreaProps> = ({
+const InputArea: React.FC<InputAreaProps> = ({
   onSendMessage,
+  onVoiceRecord,
   disabled = false,
-  placeholder = "Type your message...",
+  isLoading = false,
+  placeholder = "Type your message..."
 }) => {
+  const [currentInput, setCurrentInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { currentInput, setCurrentInput, isLoading } = useChatStore();
-  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
-  const [charCount, setCharCount] = useState(0);
-  const maxChars = 4000;
 
-  useEffect(() => {
-    setCharCount(currentInput.length);
-  }, [currentInput]);
+  // Get LLM preferences from store
+  const { llmPreferences, setLLMPreferences } = useAppStore();
 
-  useEffect(() => {
-    // Auto-focus on mount
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+  // Feature flags for voice functionality
+  const { isVoiceEnabled } = useFeatureFlags();
+
+  // Local state for dropdowns
+  const [showOnlineModels, setShowOnlineModels] = useState(false);
+  const [showOfflineModels, setShowOfflineModels] = useState(false);
+
+  // Connection status state - safe for Tauri environment
+  const [isOnline, setIsOnline] = useState(() => {
+    // Safe check for navigator.onLine in Tauri environment
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'onLine' in navigator) {
+      return navigator.onLine;
     }
-  }, []);
+    // Default to true if navigator.onLine is not available (Tauri environment)
+    return true;
+  });
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    if (value.length <= maxChars) {
-      setCurrentInput(value);
-      autoResizeTextarea();
-    }
+  // Model options
+  const onlineModels = [
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }
+  ];
+
+  const offlineModels = [
+    { value: 'gemma3n:2b', label: 'Gemma 3n 2B' },
+    { value: 'gemma3n:7b', label: 'Gemma 3n 7B' },
+    { value: 'gemma3n:latest', label: 'Gemma 3n Latest' }
+  ];
+
+  // Handler functions
+  const handleModeToggle = () => {
+    const newProvider = llmPreferences.preferredProvider === 'local' ? 'online' : 'local';
+    const updatedPreferences = {
+      ...llmPreferences,
+      preferredProvider: newProvider as 'local' | 'online'
+    };
+    setLLMPreferences(updatedPreferences);
+    llmRouter.updatePreferences(updatedPreferences);
   };
 
-  const autoResizeTextarea = () => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-    }
+  const handleOnlineModelSelect = (modelValue: string) => {
+    const updatedPreferences = {
+      ...llmPreferences,
+      selectedOnlineModel: modelValue
+    };
+    setLLMPreferences(updatedPreferences);
+    llmRouter.updatePreferences(updatedPreferences);
+    setShowOnlineModels(false);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
+  const handleOfflineModelSelect = (modelValue: string) => {
+    const updatedPreferences = {
+      ...llmPreferences,
+      selectedOfflineModel: modelValue
+    };
+    setLLMPreferences(updatedPreferences);
+    llmRouter.updatePreferences(updatedPreferences);
+    setShowOfflineModels(false);
   };
 
   const handleSendMessage = () => {
     if (currentInput.trim() && !disabled && !isLoading) {
       onSendMessage(currentInput.trim());
       setCurrentInput('');
+
+      // Enhanced focus and scroll handling after message send
       if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
         textareaRef.current.focus();
+        textareaRef.current.style.height = 'auto';
       }
     }
   };
 
-  const handleMicToggle = () => {
-    if (disabled || isLoading) {
-      console.log('Voice input blocked: system not ready');
-      return;
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
-    setIsVoiceModalOpen(true);
   };
 
-  const handleVoiceTranscriptionComplete = (text: string) => {
-    setCurrentInput(text);
-    // Auto-focus the textarea after transcription
+  // Auto-resize textarea
+  useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.focus();
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
-  };
+  }, [currentInput]);
 
-  const canSend = currentInput.trim().length > 0 && !disabled && !isLoading;
+  // Monitor connection status safely for Tauri environment
+  useEffect(() => {
+    const updateConnectionStatus = () => {
+      if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'onLine' in navigator) {
+        setIsOnline(navigator.onLine);
+      }
+    };
+
+    // Only add event listeners if they're available
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'onLine' in navigator) {
+      window.addEventListener('online', updateConnectionStatus);
+      window.addEventListener('offline', updateConnectionStatus);
+
+      return () => {
+        window.removeEventListener('online', updateConnectionStatus);
+        window.removeEventListener('offline', updateConnectionStatus);
+      };
+    }
+  }, []);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (showOnlineModels || showOfflineModels) {
+        setShowOnlineModels(false);
+        setShowOfflineModels(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showOnlineModels, showOfflineModels]);
 
   return (
-    <div className="sticky bottom-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-10">
-      <div className="max-w-4xl mx-auto p-4">
-        {/* Character Counter */}
-        {charCount > maxChars * 0.8 && (
-          <div className="flex justify-end mb-2">
-            <span
-              className={cn(
-                'text-xs px-2 py-1 rounded-full',
-                charCount > maxChars * 0.9
-                  ? 'text-red-700 bg-red-100 dark:text-red-300 dark:bg-red-900/30'
-                  : 'text-yellow-700 bg-yellow-100 dark:text-yellow-300 dark:bg-yellow-900/30'
-              )}
-            >
-              {charCount}/{maxChars}
-            </span>
-          </div>
-        )}
-
-        {/* Input Container */}
-        <div className="flex items-end gap-3">
-          {/* Microphone Button */}
-          <div className="relative">
+    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 pb-8">
+      {/* Model & Mode Selection Controls */}
+      <div className="flex items-center justify-between mb-3 px-1">
+        <div className="flex items-center space-x-4">
+          {/* Mode Toggle */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Mode:</span>
             <button
-              type="button"
-              onClick={handleMicToggle}
-              disabled={disabled || isLoading}
+              onClick={handleModeToggle}
               className={cn(
-                'flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-full transition-all duration-200',
-                'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
-                disabled || isLoading
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed dark:bg-gray-600 dark:text-gray-400'
-                  : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700 shadow-lg hover:shadow-xl transform hover:scale-105 active:scale-95'
+                "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+                llmPreferences.preferredProvider === 'online'
+                  ? "bg-green-600"
+                  : "bg-blue-600"
               )}
-              aria-label="Voice input"
-              title={disabled ? "Model not connected - Voice input unavailable" : "Click to record voice message"}
             >
-              <Mic size={20} className="drop-shadow-sm" />
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                  llmPreferences.preferredProvider === 'online'
+                    ? "translate-x-6"
+                    : "translate-x-1"
+                )}
+              />
             </button>
-            {disabled && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs">🚫</span>
-              </div>
-            )}
+            <div className="flex items-center space-x-1">
+              {llmPreferences.preferredProvider === 'online' ? (
+                <>
+                  <Wifi className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-600">Online</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-600">Offline</span>
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Text Input */}
-          <div className="flex-1 relative">
-            <textarea
-              ref={textareaRef}
-              value={currentInput}
-              onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
-              placeholder={disabled ? "Model not connected - Please check system status" : placeholder}
-              disabled={disabled || isLoading}
-              className={cn(
-                'w-full px-4 py-3 pr-14 rounded-xl border-2 border-gray-300 dark:border-gray-600',
-                'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
-                'placeholder-gray-500 dark:placeholder-gray-400',
-                'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-                'transition-all duration-200 resize-none shadow-sm',
-                'min-h-[52px] max-h-[200px]',
-                (disabled || isLoading) && 'opacity-50 cursor-not-allowed bg-gray-50 dark:bg-gray-700'
+          {/* Model Selection */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Model:</span>
+            <div className="relative">
+              {llmPreferences.preferredProvider === 'online' ? (
+                <>
+                  <button
+                    onClick={() => setShowOnlineModels(!showOnlineModels)}
+                    className="flex items-center space-x-1 px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    <span>{onlineModels.find(m => m.value === (llmPreferences.selectedOnlineModel || 'gemini-2.5-flash'))?.label}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {showOnlineModels && (
+                    <div className="absolute bottom-full mb-1 left-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg z-10">
+                      {onlineModels.map((model) => (
+                        <button
+                          key={model.value}
+                          onClick={() => handleOnlineModelSelect(model.value)}
+                          className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-md last:rounded-b-md"
+                        >
+                          {model.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowOfflineModels(!showOfflineModels)}
+                    className="flex items-center space-x-1 px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    <span>{offlineModels.find(m => m.value === (llmPreferences.selectedOfflineModel || 'gemma3n:latest'))?.label}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {showOfflineModels && (
+                    <div className="absolute bottom-full mb-1 left-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg z-10">
+                      {offlineModels.map((model) => (
+                        <button
+                          key={model.value}
+                          onClick={() => handleOfflineModelSelect(model.value)}
+                          className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-md last:rounded-b-md"
+                        >
+                          {model.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
-              rows={1}
-            />
-
-            {/* Send Button */}
-            <button
-              type="button"
-              onClick={handleSendMessage}
-              disabled={!canSend}
-              className={cn(
-                'absolute right-2 bottom-2 w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200',
-                'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
-                'transform hover:scale-105 active:scale-95',
-                canSend
-                  ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed hover:scale-100'
-              )}
-              aria-label="Send message"
-            >
-              <Send size={16} />
-            </button>
+            </div>
           </div>
         </div>
 
-        {/* Keyboard Shortcuts Hint */}
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <div className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">Enter</kbd>
-            <span>to send</span>
-          </div>
-          <span className="text-gray-300 dark:text-gray-600">•</span>
-          <div className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">Shift+Enter</kbd>
-            <span>new line</span>
-          </div>
-          {!disabled && (
-            <>
-              <span className="text-gray-300 dark:text-gray-600">•</span>
-              <div className="flex items-center gap-1">
-                <span>🎤</span>
-                <span>Click mic for voice input</span>
-              </div>
-            </>
-          )}
-          {isLoading && (
-            <>
-              <span className="text-gray-300 dark:text-gray-600">•</span>
-              <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <span>AI is thinking...</span>
-              </div>
-            </>
-          )}
+        {/* Connection Status Indicator */}
+        <div className="flex items-center space-x-1">
+          <div className={cn(
+            "w-2 h-2 rounded-full",
+            isOnline ? "bg-green-500" : "bg-red-500"
+          )} />
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {isOnline ? "Connected" : "Offline"}
+          </span>
         </div>
       </div>
-      
-      {/* Voice Recording Modal */}
-      <VoiceRecordingModal
-        isOpen={isVoiceModalOpen}
-        onClose={() => setIsVoiceModalOpen(false)}
-        onTranscriptionComplete={handleVoiceTranscriptionComplete}
-      />
+
+      <div className="flex items-end space-x-2">
+        <div className="flex-1">
+          <textarea
+            ref={textareaRef}
+            value={currentInput}
+            onChange={(e) => setCurrentInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={disabled || isLoading}
+            className={cn(
+              "w-full resize-none border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2",
+              "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100",
+              "placeholder-gray-500 dark:placeholder-gray-400",
+              "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+              "disabled:opacity-50 disabled:cursor-not-allowed"
+            )}
+            rows={1}
+            style={{ 
+              minHeight: '40px', 
+              maxHeight: '120px',
+              overflow: 'hidden'
+            }}
+          />
+        </div>
+        
+        {/* VOICE BUTTON - Conditionally rendered based on feature flags */}
+        {isVoiceEnabled && onVoiceRecord && (
+          <button
+            type="button"
+            onClick={onVoiceRecord}
+            disabled={disabled || isLoading}
+            className={cn(
+              "p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              "rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            )}
+            title="Voice input"
+          >
+            <Mic className="w-5 h-5" />
+          </button>
+        )}
+        
+        <button
+          type="button"
+          onClick={handleSendMessage}
+          disabled={disabled || isLoading || !currentInput.trim()}
+          className={cn(
+            "p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            "transition-colors duration-200"
+          )}
+          title="Send message"
+        >
+          <Send className="w-5 h-5" />
+        </button>
+      </div>
     </div>
   );
 };

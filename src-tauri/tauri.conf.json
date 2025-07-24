@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.privacy.ai.assistant",
   "build": {
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "vite build",
     "beforeDevCommand": "npm run dev:web",
     "devUrl": "http://localhost:5174",
     "frontendDist": "../dist"

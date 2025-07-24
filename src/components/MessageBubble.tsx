@@ -7,9 +7,16 @@ import { cn } from '../utils/cn';
 interface MessageBubbleProps {
   message: Message;
   onCopy?: () => void;
+  isStreaming?: boolean;
+  streamingText?: string;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({
+  message,
+  onCopy,
+  isStreaming = false,
+  streamingText = ''
+}) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -95,21 +102,26 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy })
           {!message.isLoading && !message.error && (
             <div className="prose prose-sm max-w-none">
               {isAssistant ? (
-                <ReactMarkdown
-                  className={cn(
-                    'markdown-content',
-                    'prose-headings:text-gray-900 dark:prose-headings:text-gray-100',
-                    'prose-p:text-gray-700 dark:prose-p:text-gray-300',
-                    'prose-strong:text-gray-900 dark:prose-strong:text-gray-100',
-                    'prose-code:text-gray-800 dark:prose-code:text-gray-200',
-                    'prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800'
+                <div className="relative">
+                  <ReactMarkdown
+                    className={cn(
+                      'markdown-content',
+                      'prose-headings:text-gray-900 dark:prose-headings:text-gray-100',
+                      'prose-p:text-gray-700 dark:prose-p:text-gray-300',
+                      'prose-strong:text-gray-900 dark:prose-strong:text-gray-100',
+                      'prose-code:text-gray-800 dark:prose-code:text-gray-200',
+                      'prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800'
+                    )}
+                    components={{
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                    }}
+                  >
+                    {isStreaming ? streamingText : message.content}
+                  </ReactMarkdown>
+                  {isStreaming && (
+                    <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"></span>
                   )}
-                  components={{
-                    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  }}
-                >
-                  {message.content}
-                </ReactMarkdown>
+                </div>
               ) : (
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">
                   {message.content}

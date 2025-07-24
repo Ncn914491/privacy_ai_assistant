@@ -1,0 +1,24 @@
+{
+  "id": "chat_8f5cc21c8e7f",
+  "title": "Voice Test Chat",
+  "messages": [
+    {
+      "id": "msg_ea01ae4e478d",
+      "content": "Voice integration test successful.",
+      "role": "assistant",
+      "timestamp": "2025-07-24T11:12:15.588772+00:00",
+      "token_count": 8,
+      "metadata": null
+    }
+  ],
+  "created_at": "2025-07-24T11:12:08.550751+00:00",
+  "updated_at": "2025-07-24T11:12:15.588822+00:00",
+  "metadata": {
+    "model": "llama3.1:8b",
+    "token_count": 8,
+    "message_count": 1,
+    "last_activity": "2025-07-24T11:12:15.588809+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

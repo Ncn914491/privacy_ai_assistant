@@ -1,0 +1,32 @@
+{
+  "id": "chat_1c79ff5538f2",
+  "title": "hi",
+  "messages": [
+    {
+      "id": "msg_6c79afe64fc9",
+      "content": "hi",
+      "role": "user",
+      "timestamp": "2025-07-24T11:50:04.636071+00:00",
+      "token_count": 1,
+      "metadata": null
+    },
+    {
+      "id": "msg_d5ca8071b187",
+      "content": "Hi there! 😊 \n\nHow can I help you today?  \n\nDo you have a question, need some information, want to brainstorm ideas, or just want to chat?  Let me know!",
+      "role": "assistant",
+      "timestamp": "2025-07-24T11:50:16.572886+00:00",
+      "token_count": 37,
+      "metadata": null
+    }
+  ],
+  "created_at": "2025-07-24T11:49:55.248708+00:00",
+  "updated_at": "2025-07-24T11:50:16.572925+00:00",
+  "metadata": {
+    "model": "gemma3n:latest",
+    "token_count": 38,
+    "message_count": 2,
+    "last_activity": "2025-07-24T11:50:16.572915+00:00",
+    "tags": [],
+    "is_archived": false
+  }
+}

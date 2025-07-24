@@ -1,0 +1,10 @@
+{
+  "name": "todoList",
+  "description": "Manage your todo list with add, list, delete, and complete functionality using local JSON storage",
+  "version": "1.0.0",
+  "author": "Privacy AI Assistant",
+  "keywords": ["todo", "task", "list", "manage", "organize"],
+  "triggerWords": ["todo", "task", "add task", "list tasks", "delete task", "complete task"],
+  "category": "productivity",
+  "permissions": ["file:read", "file:write"]
+}
