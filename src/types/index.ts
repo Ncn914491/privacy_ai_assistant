@@ -207,7 +207,8 @@ export interface PluginContext {
   workingDirectory?: string;
 }
 
-export interface PluginRegistry {
+// Legacy plugin registry - replaced by EnhancedPluginRegistry below
+export interface LegacyPluginRegistry {
   [pluginName: string]: Plugin;
 }
 
@@ -239,4 +240,99 @@ export interface NetworkStatus {
   isOnline: boolean;
   lastChecked: Date;
   latency?: number;
+}
+
+// ===== ENHANCED STREAMING TYPES =====
+
+export interface StreamingConfig {
+  enabled: boolean;
+  chunkSize: number;
+  delayMs: number;
+  autoScroll: boolean;
+}
+
+export interface StreamingResponse {
+  id: string;
+  content: string;
+  isComplete: boolean;
+  error?: string;
+}
+
+// ===== VOICE FEATURES TYPES =====
+
+export interface VoiceConfig {
+  sttEnabled: boolean;
+  ttsEnabled: boolean;
+  voiceProvider: 'web-speech' | 'vosk' | 'whisper';
+  ttsVoice?: string;
+  sttLanguage: string;
+  autoPlayTTS: boolean;
+}
+
+export interface VoiceRecordingState {
+  isRecording: boolean;
+  isProcessing: boolean;
+  transcription: string;
+  confidence: number;
+  error?: string;
+}
+
+// ===== SYSTEM INSTRUCTIONS TYPES =====
+
+export interface SystemInstructions {
+  systemPrompt: string;
+  promptTemplate: string;
+  behaviorSettings: {
+    responseStyle: 'concise' | 'detailed' | 'conversational';
+    creativityLevel: number; // 0-1
+    useEmojis: boolean;
+    includeThinking: boolean;
+  };
+  contextSettings: {
+    maxContextLength: number;
+    includeSystemInfo: boolean;
+    includeChatHistory: boolean;
+  };
+}
+
+export interface AppSettings {
+  systemInstructions: SystemInstructions;
+  voiceConfig: VoiceConfig;
+  streamingConfig: StreamingConfig;
+  uiPreferences: {
+    showPluginSidebar: boolean;
+    showSystemStatus: boolean;
+    compactMode: boolean;
+  };
+}
+
+// ===== ENHANCED PLUGIN TYPES =====
+
+export interface PluginUIConfig {
+  icon: string;
+  color: string;
+  position: number;
+  showInSidebar: boolean;
+  showInToolbar: boolean;
+}
+
+export interface EnhancedPluginManifest extends PluginManifest {
+  ui: PluginUIConfig;
+  dependencies?: string[];
+  settings?: Record<string, any>;
+}
+
+export interface PluginState {
+  enabled: boolean;
+  data: Record<string, any>;
+  lastUsed?: Date;
+  usageCount: number;
+}
+
+export interface PluginRegistry {
+  [pluginName: string]: {
+    plugin: Plugin;
+    manifest: EnhancedPluginManifest;
+    state: PluginState;
+  };
 }

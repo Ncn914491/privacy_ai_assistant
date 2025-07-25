@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import ChatInterface from './components/ChatInterface';
+import EnhancedChatInterface from './components/EnhancedChatInterface';
 import BrowserModeBlocker from './components/BrowserModeBlocker';
-import StartupDiagnostic from './components/StartupDiagnostic'; // Import the diagnostic component
+import StartupDiagnostic from './components/StartupDiagnostic';
 import ErrorBoundary from './components/ErrorBoundary';
-import Sidebar from './components/Sidebar';
+import EnhancedSidebar from './components/EnhancedSidebar';
 import { AppInitializingLoader } from './components/LoadingStates';
 import { FullScreenError } from './components/ErrorStates';
 import { useAppStore } from './stores/chatStore';
+import { useSettingsStore } from './stores/settingsStore';
+import { useEnhancedChatStore } from './stores/enhancedChatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
 import { SystemInfo, AppVersion } from './types';
@@ -19,6 +21,8 @@ type AppState = 'initializing' | 'diagnostics' | 'ready' | 'browser_mode' | 'err
 
 const App: React.FC = () => {
   const { preferences, setSystemInfo, setAppVersion, setInitialized } = useAppStore();
+  const { loadSettings } = useSettingsStore();
+  const { initializeStore } = useEnhancedChatStore();
   const [appState, setAppState] = useState<AppState>('initializing');
   const [error, setError] = useState<string | null>(null);
 
@@ -77,7 +81,11 @@ const App: React.FC = () => {
         setAppVersion(appVersion);
 
         await invoke('log_message', { message: 'App environment initialized.' });
-        
+
+        // Initialize enhanced stores
+        await loadSettings();
+        await initializeStore();
+
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         handleError(error, 'App Initialization');
@@ -85,7 +93,7 @@ const App: React.FC = () => {
     };
 
     initializeApp();
-  }, [setSystemInfo, setAppVersion]);
+  }, [setSystemInfo, setAppVersion, loadSettings, initializeStore]);
 
   useEffect(() => {
     // Apply theme based on user preferences
@@ -126,9 +134,9 @@ const App: React.FC = () => {
       case 'ready':
         return (
           <>
-            <Sidebar />
+            <EnhancedSidebar />
             <div className="lg:ml-80">
-              <ChatInterface />
+              <EnhancedChatInterface />
             </div>
           </>
         );
