@@ -181,7 +181,8 @@ impl LLMClient {
         }
 
         info!("Successfully generated LLM response (length: {} chars)", ollama_response.response.len());
-        Ok(ollama_response.response)
+        // Return only the response text, not the entire JSON structure
+        Ok(ollama_response.response.trim().to_string())
     }
 
     // Generate response with better error handling for large responses
@@ -274,7 +275,8 @@ impl LLMClient {
                     }
 
                     info!("✅ Successfully generated robust LLM response (length: {} chars)", ollama_response.response.len());
-                    return Ok(ollama_response.response);
+                    // Return only the response text, not the entire JSON structure
+                    return Ok(ollama_response.response.trim().to_string());
                 }
                 Err(e) => {
                     error!("❌ Request failed on attempt {}: {}", attempts, e);
@@ -633,8 +635,9 @@ async fn emit_stream_chunk(app_handle: &AppHandle, stream_id: &str, chunk: &str)
         data: chunk.to_string(),
     };
 
-    let event_name = format!("llm_stream_{}", stream_id);
-    if let Err(e) = app_handle.emit(&event_name, &event) {
+    // Use consistent event name for all streaming events
+    let event_name = "llm-stream-event";
+    if let Err(e) = app_handle.emit(event_name, &event) {
         error!("❌ Failed to emit stream chunk: {}", e);
     } else {
         info!("✅ Successfully emitted chunk event: {}", event_name);
@@ -650,8 +653,9 @@ async fn emit_stream_complete(app_handle: &AppHandle, stream_id: &str) {
         data: "".to_string(),
     };
 
-    let event_name = format!("llm_stream_{}", stream_id);
-    if let Err(e) = app_handle.emit(&event_name, &event) {
+    // Use consistent event name for all streaming events
+    let event_name = "llm-stream-event";
+    if let Err(e) = app_handle.emit(event_name, &event) {
         error!("❌ Failed to emit stream complete: {}", e);
     } else {
         info!("✅ Successfully emitted complete event: {}", event_name);
@@ -667,8 +671,9 @@ async fn emit_stream_error(app_handle: &AppHandle, stream_id: &str, error: &str)
         data: error.to_string(),
     };
 
-    let event_name = format!("llm_stream_{}", stream_id);
-    if let Err(e) = app_handle.emit(&event_name, &event) {
+    // Use consistent event name for all streaming events
+    let event_name = "llm-stream-event";
+    if let Err(e) = app_handle.emit(event_name, &event) {
         error!("❌ Failed to emit stream error: {}", e);
     } else {
         info!("✅ Successfully emitted error event: {}", event_name);

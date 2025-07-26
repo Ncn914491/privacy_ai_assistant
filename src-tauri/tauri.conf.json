@@ -37,7 +37,10 @@
       "scope": ["**"]
     },
     "http": {
-      "scope": ["http://localhost:11434/**", "https://localhost:11434/**"]
+      "scope": ["http://localhost:11434/**", "https://localhost:11434/**", "https://generativelanguage.googleapis.com/**"]
+    },
+    "store": {
+      "default": true
     }
   }
 }
