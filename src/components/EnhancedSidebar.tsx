@@ -380,15 +380,29 @@ const EnhancedSidebar: React.FC = () => {
   };
 
   const handleToolExecute = async (data: any) => {
-    // This would integrate with the actual plugin execution system
     console.log('Executing tool:', selectedTool, 'with data:', data);
 
-    // For now, just simulate execution
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({ success: true, message: 'Tool executed successfully' });
-      }, 1000);
-    });
+    try {
+      // Store tool context for LLM integration
+      const toolContext = {
+        toolName: selectedTool,
+        toolData: data.toolData,
+        context: data.context,
+        timestamp: new Date().toISOString()
+      };
+
+      // Save to localStorage for LLM context integration
+      const existingContext = JSON.parse(localStorage.getItem('toolContext') || '{}');
+      existingContext[selectedTool || 'unknown'] = toolContext;
+      localStorage.setItem('toolContext', JSON.stringify(existingContext));
+
+      console.log('Tool context saved for LLM integration:', toolContext);
+
+      return { success: true, message: 'Tool executed and context saved for LLM' };
+    } catch (error) {
+      console.error('Tool execution failed:', error);
+      return { success: false, message: 'Tool execution failed' };
+    }
   };
 
   // Filter chats based on search query
