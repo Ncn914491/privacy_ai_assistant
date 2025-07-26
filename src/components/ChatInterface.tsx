@@ -328,13 +328,28 @@ const ChatInterface: React.FC = () => {
             );
           })
         )}
-        
-        {/* Thinking Indicator */}
-        {(isLoading || isStreaming) && (
-          <ThinkingIndicator
-            isVisible={isLoading || isStreaming}
-            isStreaming={isStreaming}
+
+        {/* Show streaming message if we're streaming but don't have a message yet */}
+        {isStreaming && streamingText && messages.length > 0 && messages[messages.length - 1].role !== 'assistant' && (
+          <MessageBubble
+            message={{
+              id: 'streaming-temp',
+              role: 'assistant',
+              content: '',
+              timestamp: new Date(),
+              isLoading: false
+            }}
+            isStreaming={true}
             streamingText={streamingText}
+          />
+        )}
+
+        {/* Thinking Indicator - only show when loading, not when streaming */}
+        {isLoading && !isStreaming && (
+          <ThinkingIndicator
+            isVisible={true}
+            isStreaming={false}
+            streamingText=""
           />
         )}
       </div>

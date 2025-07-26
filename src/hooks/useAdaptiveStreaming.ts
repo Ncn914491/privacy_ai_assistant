@@ -84,8 +84,8 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
     });
   }, [isOnlineModel]);
 
-  // Online streaming using Gemini API
-  const startOnlineStream = async (
+  // Removed online streaming - using local only
+  const startLocalOnlyStream = async (
     prompt: string,
     onChunk?: (chunk: string) => void,
     onComplete?: (fullContent: string) => void,
@@ -93,13 +93,11 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
     reject?: (reason: any) => void
   ) => {
     try {
-      console.log('🌐 [ONLINE STREAMING] Starting Gemini API streaming...');
-      
-      if (!llmPreferences.geminiApiKey) {
-        throw new Error('Gemini API key not configured');
-      }
+      console.log('🏠 [LOCAL STREAMING] Starting local Ollama streaming...');
 
-      const selectedModel = llmPreferences.selectedOnlineModel || 'gemini-2.5-flash';
+      // Always use local streaming now
+
+      const selectedModel = 'gemma2:2b'; // Using local Gemma model only
       
       // Use the LLM router for online requests (non-streaming for now)
       const { llmRouter } = await import('../core/agents/llmRouter');
