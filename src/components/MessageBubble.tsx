@@ -110,16 +110,34 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       'prose-p:text-gray-700 dark:prose-p:text-gray-300',
                       'prose-strong:text-gray-900 dark:prose-strong:text-gray-100',
                       'prose-code:text-gray-800 dark:prose-code:text-gray-200',
-                      'prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800'
+                      'prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800',
+                      'prose-ul:text-gray-700 dark:prose-ul:text-gray-300',
+                      'prose-ol:text-gray-700 dark:prose-ol:text-gray-300',
+                      'prose-li:text-gray-700 dark:prose-li:text-gray-300'
                     )}
                     components={{
                       p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      code: ({ children, className }) => {
+                        const isInline = !className;
+                        return isInline ? (
+                          <code className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-sm">
+                            {children}
+                          </code>
+                        ) : (
+                          <code className={className}>{children}</code>
+                        );
+                      },
+                      pre: ({ children }) => (
+                        <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto">
+                          {children}
+                        </pre>
+                      )
                     }}
                   >
-                    {isStreaming ? streamingText : message.content}
+                    {isStreaming && streamingText ? streamingText : message.content || ''}
                   </ReactMarkdown>
                   {isStreaming && (
-                    <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1"></span>
+                    <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1" aria-label="Typing indicator"></span>
                   )}
                 </div>
               ) : (

@@ -29,13 +29,13 @@ export class LLMRouter {
     this.config = {
       preferences: {
         preferredProvider: 'local',
-        fallbackProvider: 'online',
-        autoSwitchOnOffline: true,
+        fallbackProvider: 'local', // Changed from 'online' to 'local'
+        autoSwitchOnOffline: false, // Disabled online switching
         useOnlineForComplexQueries: false,
-        geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM'
+        // Removed geminiApiKey - no longer using online APIs
       },
       networkCheckInterval: 30000, // 30 seconds
-      requestTimeout: 30000, // 30 seconds
+      requestTimeout: 60000, // Increased to 60 seconds for local models
       ...config
     };
 
@@ -160,83 +160,50 @@ export class LLMRouter {
   }
 
   /**
-   * Execute online Gemini API request
+   * Execute local Ollama request (removed online Gemini API)
    */
-  private async executeOnlineRequest(
-    prompt: string, 
+  private async executeLocalRequest(
+    prompt: string,
     systemPrompt?: string
   ): Promise<Omit<LLMResponse, 'provider' | 'model' | 'executionTime'>> {
     try {
-      if (!this.networkStatus.isOnline) {
-        throw new Error('Network is offline');
-      }
+      // Use Tauri command to communicate with local Ollama
+      const { invoke } = await import('@tauri-apps/api/core');
 
-      if (!this.config.preferences.geminiApiKey) {
-        throw new Error('Gemini API key not configured');
-      }
+      const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
 
-      // Prepare the request payload
-      const messages = [];
-      
-      if (systemPrompt) {
-        messages.push({
-          role: 'system',
-          content: systemPrompt
-        });
-      }
-      
-      messages.push({
-        role: 'user',
-        content: prompt
+      const response = await invoke('generate_llm_response', {
+        prompt: fullPrompt,
+        model: 'gemma2:2b' // Use local Gemma model
       });
-
-      // Make request to Gemini API - using selected model or default to 2.5 Flash
-      const selectedModel = this.config.preferences.selectedOnlineModel || 'gemini-2.5-flash';
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=` + this.config.preferences.geminiApiKey, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 2048,
-          }
-        }),
-        signal: AbortSignal.timeout(this.config.requestTimeout)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Gemini API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      if (!data.candidates || data.candidates.length === 0) {
-        throw new Error('No response from Gemini API');
-      }
-
-      const content = data.candidates[0].content?.parts?.[0]?.text;
-      if (!content) {
-        throw new Error('Invalid response format from Gemini API');
-      }
 
       return {
+        content: response as string,
         success: true,
-        response: content,
-        tokenCount: data.usageMetadata?.totalTokenCount
+        error: null,
+        metadata: {
+          tokensUsed: 0, // Not available from Ollama
+          finishReason: 'completed'
+        }
       };
-
     } catch (error) {
-      console.error('Online LLM request failed:', error);
+      console.error('Local LLM request failed:', error);
+      return {
+        content: '',
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        metadata: {
+          tokensUsed: 0,
+          finishReason: 'error'
+        }
+      };
+    }
+  }
+
+      // This method is now deprecated - all requests use local models
+      throw new Error('Online API requests are no longer supported. Using local models only.');
+    } catch (error) {
+      console.error('Local LLM request failed:', error);
       throw error;
     }
   }
@@ -250,14 +217,13 @@ export class LLMRouter {
       return forceProvider;
     }
 
-    // Check for explicit provider tags in prompt
-    if (prompt.includes('[use_online]') || prompt.includes('[use_gemini]')) {
-      return 'online';
-    }
-    
+    // Check for explicit provider tags in prompt (only local supported now)
     if (prompt.includes('[use_local]') || prompt.includes('[use_gemma]')) {
       return 'local';
     }
+
+    // All requests now use local models only
+    return 'local';
 
     // If offline and auto-switch is enabled, use local
     if (!this.networkStatus.isOnline && this.config.preferences.autoSwitchOnOffline) {
@@ -294,10 +260,10 @@ export class LLMRouter {
   }
 
   /**
-   * Get the model name for a provider
+   * Get the model name for a provider (local only now)
    */
   private getModelForProvider(provider: LLMProvider): LLMModel {
-    return provider === 'local' ? 'gemma3n' : 'gemini-api';
+    return 'gemma2:2b'; // Always use local Gemma model
   }
 
   /**
@@ -400,31 +366,9 @@ export class LLMRouter {
       results.local.error = error instanceof Error ? error.message : String(error);
     }
 
-    // Test online provider
-    try {
-      await this.checkNetworkStatus();
-      if (this.networkStatus.isOnline && this.config.preferences.geminiApiKey) {
-        // Quick test request to Gemini API - using selected model or default to 2.5 Flash
-        const selectedModel = this.config.preferences.selectedOnlineModel || 'gemini-2.5-flash';
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=` + this.config.preferences.geminiApiKey, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Hello' }] }],
-            generationConfig: { maxOutputTokens: 1 }
-          }),
-          signal: AbortSignal.timeout(5000)
-        });
-        results.online.available = response.ok;
-        if (!response.ok) {
-          results.online.error = `HTTP ${response.status}`;
-        }
-      } else {
-        results.online.error = this.networkStatus.isOnline ? 'No API key' : 'Offline';
-      }
-    } catch (error) {
-      results.online.error = error instanceof Error ? error.message : String(error);
-    }
+    // Online provider no longer supported - using local only
+    results.online.available = false;
+    results.online.error = 'Online API support removed - using local models only';
 
     return results;
   }

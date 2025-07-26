@@ -1,0 +1,122 @@
+{
+  "llm_streaming": {
+    "status": "failed",
+    "details": [
+      {
+        "message": "Ollama connection error: HTTPConnectionPool(host='localhost', port=11434): Max retries exceeded with url: /api/tags (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7f1bd0e25c00>: Failed to establish a new connection: [Errno 111] Connection refused'))",
+        "success": false,
+        "timestamp": 1753513456.38276
+      }
+    ]
+  },
+  "gemini_removal": {
+    "status": "failed",
+    "details": [
+      {
+        "message": "Found gemini in src/core/agents/llmRouter.ts:L266",
+        "success": false,
+        "timestamp": 1753513456.382907
+      },
+      {
+        "message": "Found 1 Gemini references still active",
+        "success": false,
+        "timestamp": 1753513456.3835251
+      }
+    ]
+  },
+  "output_parsing": {
+    "status": "passed",
+    "details": [
+      {
+        "message": "\u2713 Streaming text handling implemented",
+        "success": true,
+        "timestamp": 1753513456.38358
+      },
+      {
+        "message": "\u2713 List styling implemented",
+        "success": true,
+        "timestamp": 1753513456.383584
+      },
+      {
+        "message": "\u2713 Ordered list styling implemented",
+        "success": true,
+        "timestamp": 1753513456.3835864
+      },
+      {
+        "message": "\u2713 Accessibility improvement implemented",
+        "success": true,
+        "timestamp": 1753513456.3835902
+      },
+      {
+        "message": "\u2713 Code styling implemented",
+        "success": true,
+        "timestamp": 1753513456.3835938
+      }
+    ]
+  },
+  "tool_navigation": {
+    "status": "passed",
+    "details": [
+      {
+        "message": "ToolDashboard component created",
+        "success": true,
+        "timestamp": 1753513456.3836079
+      },
+      {
+        "message": "\u2713 TypeScript interface implemented",
+        "success": true,
+        "timestamp": 1753513456.3836234
+      },
+      {
+        "message": "\u2713 Tab navigation implemented",
+        "success": true,
+        "timestamp": 1753513456.3836255
+      },
+      {
+        "message": "\u2713 Data management implemented",
+        "success": true,
+        "timestamp": 1753513456.3836281
+      },
+      {
+        "message": "\u2713 Tool execution implemented",
+        "success": true,
+        "timestamp": 1753513456.3836308
+      },
+      {
+        "message": "\u2713 Data persistence implemented",
+        "success": true,
+        "timestamp": 1753513456.383633
+      },
+      {
+        "message": "\u2713 Sidebar tool navigation integrated",
+        "success": true,
+        "timestamp": 1753513456.3836665
+      }
+    ]
+  },
+  "ui_enhancements": {
+    "status": "passed",
+    "details": [
+      {
+        "message": "\u2713 Streaming state management implemented",
+        "success": true,
+        "timestamp": 1753513456.3837051
+      },
+      {
+        "message": "\u2713 Streaming text display implemented",
+        "success": true,
+        "timestamp": 1753513456.3837085
+      },
+      {
+        "message": "\u2713 Streaming condition check implemented",
+        "success": true,
+        "timestamp": 1753513456.3837168
+      },
+      {
+        "message": "\u2713 Temporary streaming message implemented",
+        "success": true,
+        "timestamp": 1753513456.3837264
+      }
+    ]
+  }
+}

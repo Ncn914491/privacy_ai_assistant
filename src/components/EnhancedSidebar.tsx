@@ -31,6 +31,7 @@ import { useAppStore } from '../stores/chatStore';
 import { useEnhancedChatStore } from '../stores/enhancedChatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { ChatSessionSummary } from '../types';
+import ToolDashboard from './ToolDashboard';
 
 interface ChatItemProps {
   session: ChatSessionSummary;
@@ -276,6 +277,7 @@ const EnhancedSidebar: React.FC = () => {
   const [showSidebar, setShowSidebar] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPluginSidebar, setShowPluginSidebar] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
   
   const { preferences, setTheme } = useAppStore();
   const { settings, updateUIPreferences } = useSettingsStore();
@@ -301,13 +303,55 @@ const EnhancedSidebar: React.FC = () => {
   };
 
   const availablePlugins = [
-    { id: 'todoList', name: 'Todo List', icon: CheckSquare, color: 'text-blue-600' },
-    { id: 'noteTaker', name: 'Note Taker', icon: FileText, color: 'text-green-600' },
-    { id: 'fileReader', name: 'File Reader', icon: FolderOpen, color: 'text-yellow-600' },
-    { id: 'fileWriter', name: 'File Writer', icon: FileText, color: 'text-purple-600' },
-    { id: 'pluginInspector', name: 'Plugin Inspector', icon: Eye, color: 'text-indigo-600' },
-    { id: 'devDiagnostics', name: 'Dev Diagnostics', icon: Zap, color: 'text-red-600' },
-    { id: 'webBrowser', name: 'Web Browser', icon: Globe, color: 'text-cyan-600' }
+    {
+      id: 'todoList',
+      name: 'Todo List',
+      icon: CheckSquare,
+      color: 'text-blue-600',
+      description: 'Manage your tasks and to-do items with this comprehensive task management tool.'
+    },
+    {
+      id: 'noteTaker',
+      name: 'Note Taker',
+      icon: FileText,
+      color: 'text-green-600',
+      description: 'Create, organize, and manage your notes and documentation efficiently.'
+    },
+    {
+      id: 'fileReader',
+      name: 'File Reader',
+      icon: FolderOpen,
+      color: 'text-yellow-600',
+      description: 'Read and analyze files from your system with advanced parsing capabilities.'
+    },
+    {
+      id: 'fileWriter',
+      name: 'File Writer',
+      icon: FileText,
+      color: 'text-purple-600',
+      description: 'Create and write files to your system with various format support.'
+    },
+    {
+      id: 'pluginInspector',
+      name: 'Plugin Inspector',
+      icon: Eye,
+      color: 'text-indigo-600',
+      description: 'Inspect and debug plugin functionality and system integration.'
+    },
+    {
+      id: 'devDiagnostics',
+      name: 'Dev Diagnostics',
+      icon: Zap,
+      color: 'text-red-600',
+      description: 'Advanced diagnostic tools for development and system troubleshooting.'
+    },
+    {
+      id: 'webBrowser',
+      name: 'Web Browser',
+      icon: Globe,
+      color: 'text-cyan-600',
+      description: 'Browse the web and extract information from websites.'
+    }
   ];
 
   const toggleSidebar = () => setShowSidebar(!showSidebar);
@@ -328,6 +372,23 @@ const EnhancedSidebar: React.FC = () => {
     } catch (error) {
       console.error('Failed to create new chat:', error);
     }
+  };
+
+  const handleToolClick = (toolId: string) => {
+    setSelectedTool(toolId);
+    setShowPluginSidebar(false); // Close plugin sidebar when opening tool dashboard
+  };
+
+  const handleToolExecute = async (data: any) => {
+    // This would integrate with the actual plugin execution system
+    console.log('Executing tool:', selectedTool, 'with data:', data);
+
+    // For now, just simulate execution
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({ success: true, message: 'Tool executed successfully' });
+      }, 1000);
+    });
   };
 
   // Filter chats based on search query
@@ -438,6 +499,7 @@ const EnhancedSidebar: React.FC = () => {
                 <button
                   key={plugin.id}
                   type="button"
+                  onClick={() => handleToolClick(plugin.id)}
                   className={cn(
                     "p-3 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors",
                     plugin.color
@@ -468,6 +530,18 @@ const EnhancedSidebar: React.FC = () => {
         <div
           className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
           onClick={toggleSidebar}
+        />
+      )}
+
+      {/* Tool Dashboard Modal */}
+      {selectedTool && (
+        <ToolDashboard
+          toolName={availablePlugins.find(p => p.id === selectedTool)?.name || selectedTool}
+          toolIcon={availablePlugins.find(p => p.id === selectedTool)?.icon || Package}
+          toolColor={availablePlugins.find(p => p.id === selectedTool)?.color || 'text-gray-600'}
+          description={availablePlugins.find(p => p.id === selectedTool)?.description || 'Tool dashboard'}
+          onClose={() => setSelectedTool(null)}
+          onExecute={handleToolExecute}
         />
       )}
     </>

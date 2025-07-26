@@ -6,8 +6,9 @@ use futures_util::StreamExt;
 
 // Configuration constants
 const OLLAMA_BASE_URL: &str = "http://localhost:11434";
-const DEFAULT_MODEL: &str = "gemma3n:latest"; // Standardized model name matching Ollama
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes for large LLM responses
+const DEFAULT_MODEL: &str = "gemma2:2b"; // Updated to use Gemma 2B for better performance
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120); // 2 minutes timeout
+const STREAM_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes for streaming
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OllamaRequest {
@@ -534,60 +535,70 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
         return Err(error_msg);
     }
 
-    // Read the response text (for now, we'll use the existing approach)
-    // TODO: Implement true streaming when reqwest streaming is properly configured
-    info!("📖 Reading response text from Ollama...");
-    let response_text = response.text().await
-        .map_err(|e| {
-            error!("❌ Failed to read response text: {}", e);
-            format!("Failed to read response: {}", e)
-        })?;
+    // Handle streaming response properly
+    info!("📖 Processing streaming response from Ollama...");
 
-    info!("📄 Received response text (length: {}): {}", response_text.len(),
-          if response_text.len() > 200 {
-              format!("{}...", &response_text[..200])
-          } else {
-              response_text.clone()
-          });
+    // Try to handle as streaming response first
+    let mut stream = response.bytes_stream();
+    let mut accumulated_response = String::new();
+    let mut buffer = String::new();
 
-    // Parse the response and simulate streaming with faster chunks
-    match serde_json::from_str::<OllamaResponse>(&response_text) {
-        Ok(ollama_response) => {
-            info!("✅ Successfully parsed Ollama response");
-            if !ollama_response.response.is_empty() {
-                info!("📝 Response content (length: {}): {}", ollama_response.response.len(), ollama_response.response);
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(chunk) => {
+                let chunk_str = String::from_utf8_lossy(&chunk);
+                buffer.push_str(&chunk_str);
 
-                // Simulate streaming by sending the response in smaller, faster chunks
-                let words: Vec<&str> = ollama_response.response.split_whitespace().collect();
-                let chunk_size = 1; // Send 1 word at a time for better streaming effect
+                // Process complete JSON lines
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].trim();
+                    buffer = buffer[newline_pos + 1..].to_string();
 
-                info!("🔄 Starting to emit {} chunks ({} words total)", words.chunks(chunk_size).len(), words.len());
+                    if line.is_empty() {
+                        continue;
+                    }
 
-                for (i, chunk) in words.chunks(chunk_size).enumerate() {
-                    let chunk_text = chunk.join(" ") + " ";
-                    info!("📤 Emitting chunk {}: '{}'", i + 1, chunk_text);
-                    emit_stream_chunk(app_handle, stream_id, &chunk_text).await;
+                    // Try to parse each line as JSON
+                    match serde_json::from_str::<OllamaResponse>(line) {
+                        Ok(ollama_response) => {
+                            if !ollama_response.response.is_empty() {
+                                accumulated_response.push_str(&ollama_response.response);
+                                emit_stream_chunk(app_handle, stream_id, &ollama_response.response).await;
+                            }
 
-                    // Much shorter delay for more responsive streaming
-                    tokio::time::sleep(Duration::from_millis(25)).await;
+                            // Check if this is the final chunk
+                            if ollama_response.done {
+                                info!("✅ Streaming completed successfully");
+                                emit_stream_complete(app_handle, stream_id).await;
+                                return Ok(());
+                            }
+                        }
+                        Err(e) => {
+                            warn!("⚠️ Failed to parse streaming chunk: {} - Line: {}", e, line);
+                            // Continue processing other chunks
+                        }
+                    }
                 }
-
-                info!("✅ All chunks emitted, sending completion signal");
-                emit_stream_complete(app_handle, stream_id).await;
-                return Ok(());
-            } else {
-                let error_msg = "Ollama response is empty";
+            }
+            Err(e) => {
+                let error_msg = format!("Stream error: {}", e);
                 error!("❌ {}", error_msg);
-                emit_stream_error(app_handle, stream_id, error_msg).await;
-                return Err(error_msg.to_string());
+                emit_stream_error(app_handle, stream_id, &error_msg).await;
+                return Err(error_msg);
             }
         }
-        Err(e) => {
-            let error_msg = format!("Failed to parse Ollama response: {}. Raw response: {}", e, response_text);
-            error!("❌ {}", error_msg);
-            emit_stream_error(app_handle, stream_id, &error_msg).await;
-            return Err(error_msg);
-        }
+    }
+
+    // If we reach here without completion, emit what we have
+    if !accumulated_response.is_empty() {
+        info!("✅ Stream ended, emitting final response");
+        emit_stream_complete(app_handle, stream_id).await;
+        Ok(())
+    } else {
+        let error_msg = "No response received from Ollama";
+        error!("❌ {}", error_msg);
+        emit_stream_error(app_handle, stream_id, error_msg).await;
+        Err(error_msg.to_string())
     }
 }
 
