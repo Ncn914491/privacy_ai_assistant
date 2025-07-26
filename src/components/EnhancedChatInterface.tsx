@@ -67,6 +67,18 @@ const EnhancedChatInterface: React.FC = () => {
   const streaming = useEnhancedStreaming();
   const voice = useEnhancedVoice();
 
+  // Tool context integration
+  const getToolContext = useCallback(() => {
+    try {
+      const toolContext = JSON.parse(localStorage.getItem('toolContext') || '{}');
+      console.log('🛠️ [CHAT] Retrieved tool context:', toolContext);
+      return toolContext;
+    } catch (error) {
+      console.error('❌ [CHAT] Failed to retrieve tool context:', error);
+      return {};
+    }
+  }, []);
+
   // Initialize stores and plugins
   useEffect(() => {
     const initialize = async () => {
@@ -253,10 +265,14 @@ const EnhancedChatInterface: React.FC = () => {
         systemPrompt: settings.systemInstructions.systemPrompt ? 'present' : 'none'
       });
 
+      // Get tool context for LLM integration
+      const toolContext = getToolContext();
+
       await streaming.startStream(message, {
         mode: options?.mode,
         model: options?.model,
         systemPrompt: settings.systemInstructions.systemPrompt,
+        toolContext: toolContext,
         onChunk: (accumulatedContent: string, metadata?: any) => {
           console.log(`📝 [CHAT] Chunk received - Content length: ${accumulatedContent.length} chars`);
           console.log(`📊 [CHAT] Metadata:`, metadata);

@@ -130,11 +130,21 @@ const ChatInterface: React.FC = () => {
           const assistantMessageId = `assistant-${Date.now()}`;
           addMessage('', 'assistant', assistantMessageId);
 
-          // Start enhanced streaming response with system prompt
+          // Get tool context for LLM integration
+          const getToolContext = () => {
+            try {
+              return JSON.parse(localStorage.getItem('toolContext') || '{}');
+            } catch {
+              return {};
+            }
+          };
+
+          // Start enhanced streaming response with system prompt and tool context
           const fullResponse = await streaming.startStream(message, {
             mode: 'offline', // Force offline mode for Gemma 3n
             model: 'gemma3n',
             systemPrompt: settings.systemInstructions.systemPrompt,
+            toolContext: getToolContext(),
             onChunk: (accumulatedContent: string, metadata?: any) => {
               console.log('📝 Streaming chunk received, length:', accumulatedContent.length);
               // Update the placeholder message with accumulated content in real-time

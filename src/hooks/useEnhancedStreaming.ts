@@ -5,6 +5,27 @@ import { TAURI_ENV } from '../utils/tauriDetection';
 import { useAppStore } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 
+// Utility function to format tool context for LLM
+const formatToolContext = (toolContext: any): string => {
+  if (!toolContext) return '';
+
+  if (typeof toolContext === 'string') {
+    return toolContext;
+  }
+
+  if (Array.isArray(toolContext)) {
+    return toolContext.map((item, index) => `${index + 1}. ${JSON.stringify(item)}`).join('\n');
+  }
+
+  if (typeof toolContext === 'object') {
+    return Object.entries(toolContext)
+      .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+      .join('\n');
+  }
+
+  return String(toolContext);
+};
+
 interface EnhancedStreamingState {
   isStreaming: boolean;
   streamedContent: string;
@@ -83,6 +104,7 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
       mode?: 'online' | 'offline';
       model?: string;
       systemPrompt?: string;
+      toolContext?: any;
       onChunk?: (chunk: string, metadata?: any) => void;
       onComplete?: (fullContent: string, metadata?: any) => void;
       onError?: (error: string) => void;
@@ -120,17 +142,31 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
           ? llmPreferences.selectedOnlineModel || 'gemini-2.5-flash'
           : llmPreferences.selectedOfflineModel || 'gemma3n:latest');
 
+        // Prepare enhanced prompt with system prompt and tool context
+        let enhancedPrompt = prompt;
+        if (options?.systemPrompt) {
+          enhancedPrompt = `${options.systemPrompt}\n\nUser: ${prompt}`;
+        }
+
+        // Add tool context if available
+        if (options?.toolContext) {
+          const toolContextStr = formatToolContext(options.toolContext);
+          enhancedPrompt = `${enhancedPrompt}\n\nTool Context:\n${toolContextStr}`;
+        }
+
         console.log(`📡 [STREAMING] Mode: ${mode}, Model: ${model}, Stream ID: ${streamId}`);
-        console.log(`📝 [STREAMING] Prompt length: ${prompt.length} chars`);
+        console.log(`📝 [STREAMING] Enhanced prompt length: ${enhancedPrompt.length} chars`);
+        console.log(`🔧 [STREAMING] System prompt: ${options?.systemPrompt ? 'Yes' : 'No'}`);
+        console.log(`🛠️ [STREAMING] Tool context: ${options?.toolContext ? 'Yes' : 'No'}`);
 
         // Route to appropriate streaming method
         if (mode === 'online') {
-          await executeOnlineStreaming(streamId, prompt, model, options, resolve, reject);
+          await executeOnlineStreaming(streamId, enhancedPrompt, model, options, resolve, reject);
         } else {
           if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
-            await executeTauriStreaming(streamId, prompt, model, options, resolve, reject);
+            await executeTauriStreaming(streamId, enhancedPrompt, model, options, resolve, reject);
           } else {
-            await executeWebSocketStreaming(streamId, prompt, model, options, resolve, reject);
+            await executeWebSocketStreaming(streamId, enhancedPrompt, model, options, resolve, reject);
           }
         }
       } catch (error) {

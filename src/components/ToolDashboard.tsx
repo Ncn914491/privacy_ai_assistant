@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  Save, 
-  Upload, 
-  Download, 
-  Settings, 
-  X, 
-  FileText, 
+import {
+  Plus,
+  Save,
+  Upload,
+  Download,
+  Settings,
+  X,
+  FileText,
   Database,
   Activity,
   AlertCircle,
-  CheckCircle
+  CheckCircle,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 
@@ -112,10 +113,14 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
 
   const handleExecuteTool = async () => {
     if (!onExecute) return;
-    
+
     setIsLoading(true);
     try {
-      const result = await onExecute({ toolData, toolName });
+      const result = await onExecute({
+        toolData,
+        toolName,
+        context: formatToolDataForLLM(toolData)
+      });
       setStatus('success');
       setStatusMessage('Tool executed successfully');
     } catch (error) {
@@ -125,6 +130,31 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
       setIsLoading(false);
       setTimeout(() => setStatus('idle'), 3000);
     }
+  };
+
+  const formatToolDataForLLM = (data: ToolData[]): string => {
+    if (data.length === 0) return 'No data available for this tool.';
+
+    return data.map((item, index) =>
+      `${index + 1}. ${item.title}\n   ${item.content}\n   Created: ${item.createdAt.toLocaleDateString()}`
+    ).join('\n\n');
+  };
+
+  const handleSendToChat = () => {
+    if (toolData.length === 0) {
+      setStatus('error');
+      setStatusMessage('No data to send to chat');
+      return;
+    }
+
+    const contextMessage = `Here's the data from my ${toolName}:\n\n${formatToolDataForLLM(toolData)}`;
+
+    // This would trigger sending the context to the chat
+    // For now, we'll copy to clipboard
+    navigator.clipboard.writeText(contextMessage);
+    setStatus('success');
+    setStatusMessage('Tool data copied to clipboard - paste in chat to use');
+    setTimeout(() => setStatus('idle'), 3000);
   };
 
   const tabs = [
@@ -231,6 +261,14 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
                 >
                   <Activity size={16} />
                   <span>{isLoading ? 'Executing...' : 'Execute Tool'}</span>
+                </button>
+                <button
+                  onClick={handleSendToChat}
+                  disabled={toolData.length === 0}
+                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <MessageSquare size={16} />
+                  <span>Send to Chat</span>
                 </button>
               </div>
             </div>
