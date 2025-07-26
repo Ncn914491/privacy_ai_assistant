@@ -56,8 +56,14 @@ export const useTauriStreaming = (): UseTauriStreamingReturn => {
           await stopStream();
         }
 
-        // Start new stream
-        const streamId = await invoke<string>('start_llm_stream', { prompt });
+        // Start new stream with all required parameters
+        const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await invoke('start_llm_stream', {
+          stream_id: streamId,
+          prompt: prompt,
+          model: null,
+          system_prompt: null
+        });
         console.log('✅ [TAURI STREAMING] Stream started with ID:', streamId);
         
         currentStreamIdRef.current = streamId;
@@ -136,7 +142,7 @@ export const useTauriStreaming = (): UseTauriStreamingReturn => {
     
     if (currentStreamIdRef.current) {
       try {
-        await invoke('stop_llm_stream', { streamId: currentStreamIdRef.current });
+        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });
         console.log('✅ [TAURI STREAMING] Stream stopped');
       } catch (error) {
         console.error('❌ [TAURI STREAMING] Failed to stop stream:', error);

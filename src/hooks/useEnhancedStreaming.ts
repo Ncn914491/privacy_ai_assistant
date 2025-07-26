@@ -4,7 +4,6 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { TAURI_ENV } from '../utils/tauriDetection';
 import { useAppStore } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { StreamingResponse } from '../types';
 
 interface EnhancedStreamingState {
   isStreaming: boolean;
@@ -91,16 +90,20 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
   ): Promise<string> => {
     return new Promise(async (resolve, reject) => {
       try {
+        console.log('🚀 [STREAMING] Starting new stream request...');
+
         // Stop any existing stream
         await stopStream();
-        
+
+        // Generate unique stream ID
         const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         currentStreamIdRef.current = streamId;
         fullContentRef.current = '';
         startTimeRef.current = Date.now();
         tokenCountRef.current = 0;
         isPausedRef.current = false;
-        
+
+        // Initialize streaming state
         setStreamingState({
           isStreaming: true,
           streamedContent: '',
@@ -111,25 +114,27 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
           estimatedTimeRemaining: 0,
         });
 
-        // Determine mode and model
+        // Determine mode and model with proper fallbacks
         const mode = options?.mode || (llmPreferences.preferredProvider === 'online' ? 'online' : 'offline');
-        const model = options?.model || (mode === 'online' 
+        const model = options?.model || (mode === 'online'
           ? llmPreferences.selectedOnlineModel || 'gemini-2.5-flash'
           : llmPreferences.selectedOfflineModel || 'gemma3n:latest');
 
-        console.log(`🚀 Starting enhanced streaming: ${mode} mode with ${model}`);
+        console.log(`📡 [STREAMING] Mode: ${mode}, Model: ${model}, Stream ID: ${streamId}`);
+        console.log(`📝 [STREAMING] Prompt length: ${prompt.length} chars`);
 
+        // Route to appropriate streaming method
         if (mode === 'online') {
-          await startOnlineStream(streamId, prompt, model, options, resolve, reject);
+          await executeOnlineStreaming(streamId, prompt, model, options, resolve, reject);
         } else {
           if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
-            await startTauriStream(streamId, prompt, model, options, resolve, reject);
+            await executeTauriStreaming(streamId, prompt, model, options, resolve, reject);
           } else {
-            await startWebSocketStream(streamId, prompt, model, options, resolve, reject);
+            await executeWebSocketStreaming(streamId, prompt, model, options, resolve, reject);
           }
         }
       } catch (error) {
-        console.error('❌ Failed to start enhanced streaming:', error);
+        console.error('❌ [STREAMING] Failed to start stream:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
         setStreamingState(prev => ({
           ...prev,
@@ -142,8 +147,8 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
     });
   }, [llmPreferences]);
 
-  // Online streaming (Gemini API)
-  const startOnlineStream = async (
+  // Rewritten Online Streaming Implementation
+  const executeOnlineStreaming = async (
     streamId: string,
     prompt: string,
     model: string,
@@ -152,76 +157,117 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
     reject: (reason: any) => void
   ) => {
     try {
+      console.log('🌐 [ONLINE] Starting Gemini API streaming...');
+
+      // Set timeout for online requests
+      const timeoutId = setTimeout(() => {
+        console.error('❌ [ONLINE] Request timeout after 60 seconds');
+        const errorMsg = 'Online request timed out. Please check your internet connection and try again.';
+        setStreamingState(prev => ({
+          ...prev,
+          isStreaming: false,
+          error: errorMsg,
+        }));
+        options?.onError?.(errorMsg);
+        reject(new Error(errorMsg));
+      }, 60000);
+
+      // Import and configure LLM router
       const { llmRouter } = await import('../core/agents/llmRouter');
       llmRouter.updatePreferences(llmPreferences);
-      
+
+      console.log('📡 [ONLINE] Making API request...');
       const response = await llmRouter.routeRequest(
-        prompt, 
-        options?.systemPrompt, 
+        prompt,
+        options?.systemPrompt,
         'online'
       );
-      
+
+      clearTimeout(timeoutId);
+
       if (response.success && response.response) {
-        // Simulate streaming by sending the response in chunks
+        console.log('✅ [ONLINE] Response received, starting streaming simulation...');
+        console.log(`📝 [ONLINE] Response length: ${response.response.length} chars`);
+
+        // Reset content
+        fullContentRef.current = '';
+
+        // Split response into words for streaming simulation
         const words = response.response.split(' ');
-        const chunkSize = settings.streamingConfig.chunkSize || 3;
-        const delayMs = settings.streamingConfig.delayMs || 50;
-        
+        const chunkSize = Math.max(1, settings.streamingConfig?.chunkSize || 2);
+        const delayMs = Math.max(10, settings.streamingConfig?.delayMs || 50);
+
+        console.log(`🔄 [ONLINE] Streaming ${words.length} words in chunks of ${chunkSize}`);
+
         for (let i = 0; i < words.length; i += chunkSize) {
+          // Check if stream was cancelled
           if (currentStreamIdRef.current !== streamId || isPausedRef.current) {
+            console.log('🛑 [ONLINE] Stream cancelled');
             break;
           }
 
-          const chunk = words.slice(i, i + chunkSize).join(' ') + (i + chunkSize < words.length ? ' ' : '');
+          // Build chunk
+          const chunkWords = words.slice(i, i + chunkSize);
+          const chunk = chunkWords.join(' ') + (i + chunkSize < words.length ? ' ' : '');
+
+          // Accumulate content
           fullContentRef.current += chunk;
-          tokenCountRef.current += chunkSize;
-          
-          // Calculate streaming metrics
+          tokenCountRef.current += chunkWords.length;
+
+          console.log(`📝 [ONLINE] Chunk ${Math.floor(i/chunkSize) + 1}/${Math.ceil(words.length/chunkSize)}: "${chunk.trim()}" (Total: ${fullContentRef.current.length} chars)`);
+
+          // Update streaming state
           const elapsedTime = (Date.now() - startTimeRef.current) / 1000;
-          const speed = tokenCountRef.current / elapsedTime;
-          const remainingTokens = words.length - (i + chunkSize);
-          const estimatedTimeRemaining = remainingTokens / speed;
-          
+          const speed = tokenCountRef.current / Math.max(elapsedTime, 0.1);
+
           setStreamingState(prev => ({
             ...prev,
             streamedContent: fullContentRef.current,
             totalTokens: tokenCountRef.current,
             streamingSpeed: speed,
-            estimatedTimeRemaining: Math.max(0, estimatedTimeRemaining),
+            estimatedTimeRemaining: Math.max(0, (words.length - (i + chunkSize)) / speed),
           }));
-          
-          options?.onChunk?.(chunk, {
+
+          // Call chunk callback with full accumulated content
+          options?.onChunk?.(fullContentRef.current, {
             totalTokens: tokenCountRef.current,
             speed,
             model,
-            provider: 'online'
+            provider: 'online',
+            chunk: chunk,
+            progress: (i + chunkSize) / words.length
           });
-          
+
           scrollToBottom();
-          
-          // Add delay for streaming effect
+
+          // Add streaming delay
           await new Promise(resolve => setTimeout(resolve, delayMs));
         }
-        
+
+        console.log('✅ [ONLINE] Streaming completed successfully');
+        console.log(`📊 [ONLINE] Final content length: ${fullContentRef.current.length} chars`);
+
+        // Finalize streaming state
         setStreamingState(prev => ({
           ...prev,
           isStreaming: false,
           estimatedTimeRemaining: 0,
         }));
-        
+
+        // Call completion callback
         options?.onComplete?.(fullContentRef.current, {
           totalTokens: tokenCountRef.current,
           model,
           provider: 'online',
           executionTime: Date.now() - startTimeRef.current
         });
-        
+
         resolve(fullContentRef.current);
       } else {
-        throw new Error(response.error || 'Online streaming failed');
+        throw new Error(response.error || 'No response received from Gemini API');
       }
     } catch (error) {
-      console.error('❌ Online streaming error:', error);
+      console.error('❌ [ONLINE] Streaming error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       setStreamingState(prev => ({
         ...prev,
@@ -233,8 +279,8 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
     }
   };
 
-  // Tauri streaming (Ollama)
-  const startTauriStream = async (
+  // Rewritten Tauri Streaming Implementation - Fixed Parameter Issue
+  const executeTauriStreaming = async (
     streamId: string,
     prompt: string,
     model: string,
@@ -243,75 +289,134 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
     reject: (reason: any) => void
   ) => {
     try {
-      // Listen for streaming events
+      console.log(`🚀 [TAURI] Starting local streaming with Ollama...`);
+      console.log(`📡 [TAURI] Stream ID: ${streamId}, Model: ${model}`);
+
+      // Reset content
+      fullContentRef.current = '';
+
+      // Listen for streaming events from Tauri backend
+      console.log(`👂 [TAURI] Setting up event listener for stream: ${streamId}`);
       const unlisten = await listen<StreamEvent>('llm-stream-event', (event) => {
         const { stream_id, event_type, data, metadata } = event.payload;
-        
-        if (stream_id !== streamId) return;
-        
+
+        console.log(`📨 [TAURI] Event received: ${event_type} for stream: ${stream_id}`);
+
+        // Ignore events for different streams
+        if (stream_id !== streamId) {
+          console.log(`🚫 [TAURI] Ignoring event for different stream: ${stream_id} (expected: ${streamId})`);
+          return;
+        }
+
         switch (event_type) {
           case 'chunk':
+            console.log(`📝 [TAURI] Processing chunk: "${data}" (length: ${data.length})`);
             if (!isPausedRef.current) {
+              // Accumulate content
               fullContentRef.current += data;
               tokenCountRef.current += metadata?.tokens || 1;
-              
+
+              // Calculate metrics
               const elapsedTime = (Date.now() - startTimeRef.current) / 1000;
-              const speed = tokenCountRef.current / elapsedTime;
-              
+              const speed = tokenCountRef.current / Math.max(elapsedTime, 0.1);
+
+              // Update streaming state
               setStreamingState(prev => ({
                 ...prev,
                 streamedContent: fullContentRef.current,
                 totalTokens: tokenCountRef.current,
                 streamingSpeed: speed,
               }));
-              
-              options?.onChunk?.(data, metadata);
+
+              console.log(`🔄 [TAURI] Calling onChunk with accumulated content: ${fullContentRef.current.length} chars`);
+
+              // Call chunk callback with full accumulated content
+              options?.onChunk?.(fullContentRef.current, {
+                ...metadata,
+                chunk: data,
+                totalTokens: tokenCountRef.current,
+                speed,
+                model,
+                provider: 'local'
+              });
+
               scrollToBottom();
+            } else {
+              console.log(`⏸️ [TAURI] Stream paused, skipping chunk`);
             }
             break;
-            
+
           case 'complete':
+            console.log(`✅ [TAURI] Stream completed with final content length: ${fullContentRef.current.length}`);
+
+            // Finalize streaming state
             setStreamingState(prev => ({
               ...prev,
               isStreaming: false,
               estimatedTimeRemaining: 0,
             }));
-            
+
+            // Call completion callback
             options?.onComplete?.(fullContentRef.current, {
               totalTokens: tokenCountRef.current,
               model,
               provider: 'local',
               executionTime: Date.now() - startTimeRef.current
             });
-            
+
             resolve(fullContentRef.current);
             break;
-            
+
           case 'error':
+            console.error(`❌ [TAURI] Stream error: ${data}`);
             setStreamingState(prev => ({
               ...prev,
               isStreaming: false,
               error: data,
             }));
-            
+
             options?.onError?.(data);
             reject(new Error(data));
             break;
         }
       });
-      
+
       unlistenRef.current = unlisten;
-      
-      // Start streaming via Tauri
-      await invoke('start_llm_stream', {
-        streamId,
-        prompt,
+
+      // Set timeout for Tauri streaming
+      const timeoutId = setTimeout(() => {
+        console.error('❌ [TAURI] Streaming timeout after 60 seconds');
+        const errorMsg = 'Local model request timed out. The model may be loading or under heavy load. Please try again.';
+        setStreamingState(prev => ({
+          ...prev,
+          isStreaming: false,
+          error: errorMsg,
+        }));
+        options?.onError?.(errorMsg);
+        reject(new Error(errorMsg));
+      }, 60000);
+
+      // FIXED: Use correct parameter names for Tauri command
+      console.log(`🚀 [TAURI] Invoking start_llm_stream command`);
+      console.log(`📝 [TAURI] Parameters:`, {
+        stream_id: streamId,
+        prompt: prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''),
         model,
-        systemPrompt: options?.systemPrompt,
+        system_prompt: options?.systemPrompt || null
       });
-      
+
+      await invoke('start_llm_stream', {
+        stream_id: streamId,  // This matches the Rust parameter name
+        prompt: prompt,
+        model: model,
+        system_prompt: options?.systemPrompt || null,
+      });
+
+      console.log(`✅ [TAURI] Command invoked successfully`);
+      clearTimeout(timeoutId);
+
     } catch (error) {
-      console.error('❌ Tauri streaming error:', error);
+      console.error('❌ [TAURI] Streaming error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       setStreamingState(prev => ({
         ...prev,
@@ -323,8 +428,8 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
     }
   };
 
-  // WebSocket streaming (Python backend)
-  const startWebSocketStream = async (
+  // Rewritten WebSocket Streaming Implementation
+  const executeWebSocketStreaming = async (
     streamId: string,
     prompt: string,
     model: string,
@@ -333,12 +438,17 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
     reject: (reason: any) => void
   ) => {
     try {
+      console.log('🔌 [WEBSOCKET] Starting WebSocket streaming...');
+
+      // Reset content
+      fullContentRef.current = '';
+
       const ws = new WebSocket('ws://127.0.0.1:8000/llm/stream');
       websocketRef.current = ws;
 
       ws.onopen = () => {
-        console.log('✅ WebSocket connected for enhanced streaming');
-        
+        console.log('✅ [WEBSOCKET] Connected successfully');
+
         const request = {
           stream_id: streamId,
           prompt,
@@ -346,73 +456,98 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
           system_prompt: options?.systemPrompt,
           streaming_config: settings.streamingConfig
         };
-        
+
+        console.log('📤 [WEBSOCKET] Sending request:', { ...request, prompt: prompt.substring(0, 100) + '...' });
         ws.send(JSON.stringify(request));
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
-          if (data.stream_id !== streamId) return;
-          
+          console.log('📨 [WEBSOCKET] Message received:', data.type, data.stream_id);
+
+          if (data.stream_id !== streamId) {
+            console.log(`🚫 [WEBSOCKET] Ignoring message for different stream: ${data.stream_id}`);
+            return;
+          }
+
           switch (data.type) {
             case 'chunk':
+              console.log(`📝 [WEBSOCKET] Processing chunk: "${data.content}" (length: ${data.content.length})`);
               if (!isPausedRef.current) {
+                // Accumulate content
                 fullContentRef.current += data.content;
                 tokenCountRef.current += data.tokens || 1;
-                
+
+                // Calculate metrics
                 const elapsedTime = (Date.now() - startTimeRef.current) / 1000;
-                const speed = tokenCountRef.current / elapsedTime;
-                
+                const speed = tokenCountRef.current / Math.max(elapsedTime, 0.1);
+
+                // Update streaming state
                 setStreamingState(prev => ({
                   ...prev,
                   streamedContent: fullContentRef.current,
                   totalTokens: tokenCountRef.current,
                   streamingSpeed: speed,
                 }));
-                
-                options?.onChunk?.(data.content, data.metadata);
+
+                console.log(`🔄 [WEBSOCKET] Calling onChunk with accumulated content: ${fullContentRef.current.length} chars`);
+
+                // Call chunk callback with full accumulated content
+                options?.onChunk?.(fullContentRef.current, {
+                  ...data.metadata,
+                  chunk: data.content,
+                  totalTokens: tokenCountRef.current,
+                  speed,
+                  model,
+                  provider: 'local'
+                });
+
                 scrollToBottom();
               }
               break;
-              
+
             case 'complete':
+              console.log(`✅ [WEBSOCKET] Stream completed with final content length: ${fullContentRef.current.length}`);
+
+              // Finalize streaming state
               setStreamingState(prev => ({
                 ...prev,
                 isStreaming: false,
                 estimatedTimeRemaining: 0,
               }));
-              
+
+              // Call completion callback
               options?.onComplete?.(fullContentRef.current, {
                 totalTokens: tokenCountRef.current,
                 model,
                 provider: 'local',
                 executionTime: Date.now() - startTimeRef.current
               });
-              
+
               resolve(fullContentRef.current);
               break;
-              
+
             case 'error':
+              console.error(`❌ [WEBSOCKET] Stream error: ${data.error}`);
               setStreamingState(prev => ({
                 ...prev,
                 isStreaming: false,
                 error: data.error,
               }));
-              
+
               options?.onError?.(data.error);
               reject(new Error(data.error));
               break;
           }
         } catch (error) {
-          console.error('❌ WebSocket message parsing error:', error);
+          console.error('❌ [WEBSOCKET] Message parsing error:', error);
         }
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
-        const errorMessage = 'WebSocket connection failed';
+        console.error('❌ [WEBSOCKET] Connection error:', error);
+        const errorMessage = 'WebSocket connection failed - ensure Python backend is running';
         setStreamingState(prev => ({
           ...prev,
           isStreaming: false,
@@ -423,12 +558,12 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
       };
 
       ws.onclose = () => {
-        console.log('🔌 WebSocket connection closed');
+        console.log('🔌 [WEBSOCKET] Connection closed');
         websocketRef.current = null;
       };
 
     } catch (error) {
-      console.error('❌ WebSocket streaming error:', error);
+      console.error('❌ [WEBSOCKET] Streaming error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       setStreamingState(prev => ({
         ...prev,
@@ -455,9 +590,9 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
       websocketRef.current = null;
     }
     
-    if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
+    if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke && currentStreamIdRef.current) {
       try {
-        await invoke('stop_llm_stream');
+        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });
       } catch (error) {
         console.warn('Failed to stop Tauri stream:', error);
       }

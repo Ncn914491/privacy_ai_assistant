@@ -159,7 +159,13 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
     try {
       console.log('🖥️ [TAURI STREAMING] Starting Tauri streaming...');
       
-      const streamId = await invoke<string>('start_llm_stream', { prompt });
+      const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      await invoke('start_llm_stream', {
+        stream_id: streamId,
+        prompt: prompt,
+        model: llmPreferences.selectedOfflineModel || null,
+        system_prompt: null
+      });
       currentStreamIdRef.current = streamId;
       
       setStreamingState(prev => ({
@@ -288,7 +294,7 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
     // Stop Tauri stream
     if (currentStreamIdRef.current) {
       try {
-        await invoke('stop_llm_stream', { streamId: currentStreamIdRef.current });
+        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });
       } catch (error) {
         console.error('❌ Failed to stop Tauri stream:', error);
       }

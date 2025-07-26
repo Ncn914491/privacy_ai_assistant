@@ -13,6 +13,8 @@ import { useAppStore } from '../stores/chatStore';
 import { useEnhancedStreaming } from '../hooks/useEnhancedStreaming';
 import { useEnhancedVoice } from '../hooks/useEnhancedVoice';
 import { modelHealthChecker, ModelHealthStatus } from '../utils/modelHealth';
+import { PluginRunner } from '../core/agents/pluginRunner';
+import { PluginLoaderImpl } from '../core/plugins/loader';
 import {
   Settings,
   WifiOff,
@@ -45,7 +47,9 @@ const EnhancedChatInterface: React.FC = () => {
   // Store hooks
   const {
     messages,
+    chatSessions,
     addMessageWithMetadata,
+    updateMessage,
     setLoading,
     isLoading,
     activeChatId,
@@ -60,12 +64,37 @@ const EnhancedChatInterface: React.FC = () => {
   const streaming = useEnhancedStreaming();
   const voice = useEnhancedVoice();
 
-  // Initialize stores
+  // Initialize stores and plugins
   useEffect(() => {
-    if (!isInitialized) {
-      initializeStore();
-    }
-  }, [isInitialized, initializeStore]);
+    const initialize = async () => {
+      if (!isInitialized) {
+        await initializeStore();
+      }
+
+      // Load plugins if enabled
+      if (pluginsEnabled) {
+        try {
+          const pluginLoader = new PluginLoaderImpl();
+          await pluginLoader.loadAllPlugins();
+          console.log('✅ Plugins loaded successfully');
+        } catch (error) {
+          console.error('❌ Failed to load plugins:', error);
+        }
+      }
+    };
+
+    initialize();
+
+    // Fallback: Force initialization after 5 seconds to prevent permanent input blocking
+    const fallbackTimer = setTimeout(() => {
+      if (!isInitialized) {
+        console.warn('⚠️ Forcing initialization after timeout to prevent input blocking');
+        initializeStore();
+      }
+    }, 5000);
+
+    return () => clearTimeout(fallbackTimer);
+  }, [isInitialized, initializeStore, pluginsEnabled]);
 
   // Subscribe to model health status
   useEffect(() => {
@@ -110,8 +139,34 @@ const EnhancedChatInterface: React.FC = () => {
     }
   }, [messages, streaming.streamingState.isStreaming, settings.voiceConfig.autoPlayTTS]);
 
+  // Helper function to update the last assistant message during streaming
+  const updateLastAssistantMessage = (content: string, isComplete: boolean) => {
+    const currentMessages = messages;
+    if (currentMessages.length > 0) {
+      const lastMessage = currentMessages[currentMessages.length - 1];
+      if (lastMessage.role === 'assistant') {
+        // Update the message using the store's updateMessage function
+        updateMessage(lastMessage.id, {
+          content: content,
+          metadata: {
+            ...lastMessage.metadata,
+            isStreaming: !isComplete
+          }
+        });
+      }
+    }
+  };
+
   const handleSendMessage = async (message: string, options?: { mode?: 'online' | 'offline'; model?: string }) => {
-    if (!message.trim() || isLoading) return;
+    // FIXED: Check for streaming state to prevent concurrent requests
+    if (!message.trim() || isLoading || streaming.streamingState.isStreaming) {
+      console.log('🚫 [CHAT] Message blocked:', {
+        empty: !message.trim(),
+        loading: isLoading,
+        streaming: streaming.streamingState.isStreaming
+      });
+      return;
+    }
 
     try {
       setLoading(true);
@@ -122,37 +177,115 @@ const EnhancedChatInterface: React.FC = () => {
         provider: options?.mode === 'online' ? 'online' : 'local'
       });
 
-      // Start streaming response
-      const fullResponse = await streaming.startStream(message, {
+      // Check if plugins are enabled and try plugin execution first
+      if (pluginsEnabled) {
+        try {
+          const pluginRunner = new PluginRunner({
+            enableLogging: true,
+            fallbackToLLM: true,
+            maxExecutionTime: 30000
+          });
+
+          const pluginResult = await pluginRunner.processInput(message, {
+            chatId: activeChatId || 'default',
+            userId: 'user',
+            timestamp: new Date()
+          });
+
+          if (pluginResult.shouldExecutePlugin && pluginResult.pluginResult?.success) {
+            // Plugin executed successfully
+            const pluginResponse = pluginResult.pluginResult.message ||
+                                 JSON.stringify(pluginResult.pluginResult.data, null, 2) ||
+                                 'Plugin executed successfully';
+
+            addMessageWithMetadata(pluginResponse, 'assistant', {
+              model: 'plugin-system',
+              provider: 'plugin'
+            });
+
+            setLoading(false);
+            return; // Don't proceed to LLM if plugin handled the request
+          }
+        } catch (pluginError) {
+          console.warn('Plugin execution failed, falling back to LLM:', pluginError);
+        }
+      }
+
+      // Create a placeholder assistant message for streaming
+      const assistantMessageId = `msg_${Date.now()}_assistant`;
+      const assistantMessage = {
+        id: assistantMessageId,
+        content: '',
+        role: 'assistant' as const,
+        timestamp: new Date(),
+        metadata: {
+          model: options?.model,
+          provider: options?.mode === 'online' ? 'online' : 'local',
+          isStreaming: true
+        }
+      };
+
+      // Add the placeholder message immediately
+      addMessageWithMetadata('', 'assistant', {
+        model: options?.model,
+        provider: options?.mode === 'online' ? 'online' : 'local'
+      });
+
+      // REWRITTEN: Start streaming with enhanced error handling and logging
+      console.log('🚀 [CHAT] Starting LLM streaming...');
+      console.log('🔧 [CHAT] Stream options:', {
+        mode: options?.mode,
+        model: options?.model,
+        systemPrompt: settings.systemInstructions.systemPrompt ? 'present' : 'none'
+      });
+
+      await streaming.startStream(message, {
         mode: options?.mode,
         model: options?.model,
         systemPrompt: settings.systemInstructions.systemPrompt,
-        onChunk: (chunk: string, metadata?: any) => {
-          console.log('📝 Streaming chunk received:', chunk);
+        onChunk: (accumulatedContent: string, metadata?: any) => {
+          console.log(`📝 [CHAT] Chunk received - Content length: ${accumulatedContent.length} chars`);
+          console.log(`📊 [CHAT] Metadata:`, metadata);
+
+          // FIXED: Update message with real-time accumulated content
+          updateLastAssistantMessage(accumulatedContent, false);
         },
-        onComplete: (fullContent: string, metadata?: any) => {
-          console.log('✅ Streaming completed');
-          // Add the complete response as an assistant message
-          addMessageWithMetadata(fullContent, 'assistant', {
-            model: metadata?.model,
-            provider: metadata?.provider,
-            tokens: metadata?.totalTokens
-          });
+        onComplete: (finalContent: string, metadata?: any) => {
+          console.log(`✅ [CHAT] Streaming completed - Final length: ${finalContent.length} chars`);
+          console.log(`📊 [CHAT] Final metadata:`, metadata);
+
+          // FIXED: Finalize message with complete content
+          updateLastAssistantMessage(finalContent, true);
         },
         onError: (error: string) => {
-          console.error('❌ Streaming error:', error);
-          addMessageWithMetadata(
-            `❌ **Error**: ${error}\n\nPlease try again or check your connection.`,
-            'assistant'
-          );
+          console.error('❌ [CHAT] Streaming error:', error);
+
+          // FIXED: Show detailed error message
+          const errorMessage = `❌ **Streaming Error**: ${error}\n\n` +
+                              `**Troubleshooting:**\n` +
+                              `• Check your internet connection for online models\n` +
+                              `• Ensure Ollama is running for local models\n` +
+                              `• Try switching between online/offline modes\n\n` +
+                              `Please try again or contact support if the issue persists.`;
+
+          updateLastAssistantMessage(errorMessage, true);
         }
       });
 
+      console.log('🏁 [CHAT] Streaming request initiated successfully');
+
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('❌ [CHAT] Critical error in handleSendMessage:', error);
       const errorStr = error instanceof Error ? error.message : String(error);
+
+      // Add error message to chat
       addMessageWithMetadata(
-        `❌ **Unexpected Error**: ${errorStr}\n\nPlease try again or check the system status.`,
+        `❌ **System Error**: ${errorStr}\n\n` +
+        `**Troubleshooting:**\n` +
+        `• Check your internet connection\n` +
+        `• Verify Ollama is running for local models\n` +
+        `• Try refreshing the application\n\n` +
+        `Please try again or contact support if the issue persists.`,
         'assistant'
       );
     } finally {
@@ -326,10 +459,12 @@ const EnhancedChatInterface: React.FC = () => {
       </div>
 
       {/* Chat Messages */}
-      <div 
+      <div
         ref={chatWindowRef}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        id="chat-window"
+        className="flex-1 overflow-y-auto p-4 space-y-4 chat-container"
         style={{ scrollBehavior: 'smooth' }}
+        data-chat-container
       >
         {messages.length === 0 ? (
           <div className="text-center text-gray-500 dark:text-gray-400 mt-8">
@@ -361,12 +496,14 @@ const EnhancedChatInterface: React.FC = () => {
             const isLastAssistantMessage = message.role === 'assistant' && index === messages.length - 1;
             const shouldShowStreaming = streaming.streamingState.isStreaming && isLastAssistantMessage;
 
+            // For streaming messages, use the message content (which gets updated during streaming)
+            // The message content is updated in real-time by updateLastAssistantMessage
             return (
               <MessageBubble
                 key={message.id}
                 message={message}
                 isStreaming={shouldShowStreaming}
-                streamingText={shouldShowStreaming ? streaming.streamingState.streamedContent : ''}
+                streamingText={shouldShowStreaming ? message.content : ''}
               />
             );
           })
