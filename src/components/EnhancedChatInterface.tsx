@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import MessageBubble from './MessageBubble';
 import InputArea from './InputArea';
 import ModelStatusBadge from './ModelStatusBadge';
@@ -7,6 +7,7 @@ import ThinkingIndicator from './ThinkingIndicator';
 import EnhancedVoiceModal from './EnhancedVoiceModal';
 import EnhancedPluginPanel from './EnhancedPluginPanel';
 import SystemSettingsPanel from './SystemSettingsPanel';
+import SystemPromptPanel from './SystemPromptPanel';
 import { useEnhancedChatStore } from '../stores/enhancedChatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAppStore } from '../stores/chatStore';
@@ -26,7 +27,8 @@ import {
   VolumeX,
   Pause,
   Play,
-  Square
+  Square,
+  FileText
 } from 'lucide-react';
 import { cn } from '../utils/cn';
 
@@ -35,6 +37,7 @@ const EnhancedChatInterface: React.FC = () => {
   const [showVoiceModal, setShowVoiceModal] = useState(false);
   const [showPluginPanel, setShowPluginPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [showSystemPromptPanel, setShowSystemPromptPanel] = useState(false);
   const [networkStatus, setNetworkStatus] = useState(() => {
     if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'onLine' in navigator) {
       return navigator.onLine;
@@ -139,23 +142,33 @@ const EnhancedChatInterface: React.FC = () => {
     }
   }, [messages, streaming.streamingState.isStreaming, settings.voiceConfig.autoPlayTTS]);
 
-  // Helper function to update the last assistant message during streaming
-  const updateLastAssistantMessage = (content: string, isComplete: boolean) => {
-    const currentMessages = messages;
-    if (currentMessages.length > 0) {
-      const lastMessage = currentMessages[currentMessages.length - 1];
-      if (lastMessage.role === 'assistant') {
-        // Update the message using the store's updateMessage function
-        updateMessage(lastMessage.id, {
-          content: content,
-          metadata: {
-            ...lastMessage.metadata,
-            isStreaming: !isComplete
-          }
-        });
-      }
+  // State to track the current assistant message being streamed
+  const [currentAssistantMessageId, setCurrentAssistantMessageId] = useState<string | null>(null);
+
+  // Helper function to update the assistant message during streaming
+  const updateAssistantMessage = useCallback((content: string, isComplete: boolean) => {
+    if (!currentAssistantMessageId) {
+      console.warn('❌ [CHAT] No current assistant message ID to update');
+      return;
     }
-  };
+
+    console.log(`🔄 [CHAT] Updating assistant message ${currentAssistantMessageId} with ${content.length} chars`);
+    
+    // Update the message using the store's updateMessage function
+    updateMessage(currentAssistantMessageId, {
+      content: content,
+      metadata: {
+        isStreaming: !isComplete,
+        lastUpdated: new Date()
+      }
+    });
+
+    // Clear the tracking ID when streaming is complete
+    if (isComplete) {
+      console.log(`✅ [CHAT] Completed streaming for message ${currentAssistantMessageId}`);
+      setCurrentAssistantMessageId(null);
+    }
+  }, [currentAssistantMessageId, updateMessage]);
 
   const handleSendMessage = async (message: string, options?: { mode?: 'online' | 'offline'; model?: string }) => {
     // FIXED: Check for streaming state to prevent concurrent requests
@@ -212,24 +225,25 @@ const EnhancedChatInterface: React.FC = () => {
       }
 
       // Create a placeholder assistant message for streaming
-      const assistantMessageId = `msg_${Date.now()}_assistant`;
-      const assistantMessage = {
-        id: assistantMessageId,
-        content: '',
-        role: 'assistant' as const,
-        timestamp: new Date(),
-        metadata: {
-          model: options?.model,
-          provider: options?.mode === 'online' ? 'online' : 'local',
-          isStreaming: true
-        }
-      };
-
-      // Add the placeholder message immediately
+      console.log(`🏷️ [CHAT] Creating placeholder assistant message for streaming`);
+      
+      // Add the placeholder message immediately and get its ID for tracking
+      const currentMessages = messages;
       addMessageWithMetadata('', 'assistant', {
         model: options?.model,
         provider: options?.mode === 'online' ? 'online' : 'local'
       });
+      
+      // Get the ID of the newly created assistant message
+      // We'll track this after the message is added to the store
+      setTimeout(() => {
+        const updatedMessages = useEnhancedChatStore.getState().messages;
+        const lastMessage = updatedMessages[updatedMessages.length - 1];
+        if (lastMessage && lastMessage.role === 'assistant') {
+          setCurrentAssistantMessageId(lastMessage.id);
+          console.log(`🏷️ [CHAT] Tracking assistant message ID: ${lastMessage.id}`);
+        }
+      }, 100);
 
       // REWRITTEN: Start streaming with enhanced error handling and logging
       console.log('🚀 [CHAT] Starting LLM streaming...');
@@ -248,14 +262,14 @@ const EnhancedChatInterface: React.FC = () => {
           console.log(`📊 [CHAT] Metadata:`, metadata);
 
           // FIXED: Update message with real-time accumulated content
-          updateLastAssistantMessage(accumulatedContent, false);
+          updateAssistantMessage(accumulatedContent, false);
         },
         onComplete: (finalContent: string, metadata?: any) => {
           console.log(`✅ [CHAT] Streaming completed - Final length: ${finalContent.length} chars`);
           console.log(`📊 [CHAT] Final metadata:`, metadata);
 
           // FIXED: Finalize message with complete content
-          updateLastAssistantMessage(finalContent, true);
+          updateAssistantMessage(finalContent, true);
         },
         onError: (error: string) => {
           console.error('❌ [CHAT] Streaming error:', error);
@@ -268,7 +282,7 @@ const EnhancedChatInterface: React.FC = () => {
                               `• Try switching between online/offline modes\n\n` +
                               `Please try again or contact support if the issue persists.`;
 
-          updateLastAssistantMessage(errorMessage, true);
+          updateAssistantMessage(errorMessage, true);
         }
       });
 
@@ -416,6 +430,21 @@ const EnhancedChatInterface: React.FC = () => {
               </button>
             )}
 
+            {/* System Prompt Editor */}
+            <button
+              type="button"
+              onClick={() => setShowSystemPromptPanel(true)}
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                settings.systemInstructions.systemPrompt
+                  ? "bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+              )}
+              title="System Prompt Editor"
+            >
+              <FileText className="w-4 h-4" />
+            </button>
+
             {/* Plugin Manager */}
             <button
               type="button"
@@ -496,14 +525,13 @@ const EnhancedChatInterface: React.FC = () => {
             const isLastAssistantMessage = message.role === 'assistant' && index === messages.length - 1;
             const shouldShowStreaming = streaming.streamingState.isStreaming && isLastAssistantMessage;
 
-            // For streaming messages, use the message content (which gets updated during streaming)
-            // The message content is updated in real-time by updateLastAssistantMessage
+            // Message content is updated in real-time during streaming via updateMessage
             return (
               <MessageBubble
                 key={message.id}
                 message={message}
                 isStreaming={shouldShowStreaming}
-                streamingText={shouldShowStreaming ? message.content : ''}
+                streamingText=""
               />
             );
           })
@@ -523,9 +551,9 @@ const EnhancedChatInterface: React.FC = () => {
       <InputArea
         onSendMessage={handleSendMessage}
         onVoiceRecord={settings.voiceConfig.sttEnabled ? handleVoiceRecord : undefined}
-        disabled={!isInitialized}
+        disabled={false}
         isLoading={isLoading || streaming.streamingState.isStreaming}
-        showVoiceControls={settings.voiceConfig.sttEnabled || settings.voiceConfig.ttsEnabled}
+        placeholder={!isInitialized ? "Initializing..." : "Type your message..."}
       />
 
       {/* Enhanced Voice Modal */}
@@ -547,6 +575,12 @@ const EnhancedChatInterface: React.FC = () => {
       <SystemSettingsPanel
         isOpen={showSettingsPanel}
         onClose={() => setShowSettingsPanel(false)}
+      />
+
+      {/* System Prompt Panel */}
+      <SystemPromptPanel
+        isOpen={showSystemPromptPanel}
+        onClose={() => setShowSystemPromptPanel(false)}
       />
     </div>
   );

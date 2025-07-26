@@ -11,10 +11,13 @@ import HardwareStatusBadge from './HardwareStatusBadge';
 import ThinkingIndicator from './ThinkingIndicator';
 import StartupDiagnostic from './StartupDiagnostic';
 import { useMultiChatStore, useAppStore } from '../stores/chatStore';
+import { useEnhancedChatStore } from '../stores/enhancedChatStore';
 import { modelHealthChecker, ModelHealthStatus } from '../utils/modelHealth';
-import { useAdaptiveStreaming } from '../hooks/useAdaptiveStreaming';
-import { Settings, WifiOff, Cpu, Globe, Package } from 'lucide-react';
-import PluginPanel from './PluginPanel';
+import { useEnhancedStreaming } from '../hooks/useEnhancedStreaming';
+import { Settings, WifiOff, Cpu, Globe, Package, Edit3 } from 'lucide-react';
+import EnhancedSidebar from './EnhancedSidebar';
+import SystemSettingsPanel from './SystemSettingsPanel';
+import { useSettingsStore } from '../stores/settingsStore';
 
 const ChatInterface: React.FC = () => {
   // VOICE COMPONENTS TEMPORARILY DISABLED - Unstable audio/mic/formatting bugs
@@ -22,13 +25,14 @@ const ChatInterface: React.FC = () => {
   // const [showRealtimeVoiceModal, setShowRealtimeVoiceModal] = useState(false);
   // const [showRealtimeConversationModal, setShowRealtimeConversationModal] = useState(false);
   // const [showAudioDiagnostic, setShowAudioDiagnostic] = useState(false);
-  const [systemReady, setSystemReady] = useState(false);
+  const [systemReady, setSystemReady] = useState(true); // Start as ready, diagnostic is informational
   const [showDiagnostic, setShowDiagnostic] = useState(true);
   const [modelHealth, setModelHealth] = useState<ModelHealthStatus | null>(null);
 
   const {
     messages,
     addMessage,
+    updateMessage,
     setLoading,
     isLoading,
     executePlugin
@@ -41,6 +45,9 @@ const ChatInterface: React.FC = () => {
     setPluginsEnabled
   } = useAppStore();
 
+  // Enhanced chat store for history
+  const enhancedChatStore = useEnhancedChatStore();
+
   const chatWindowRef = useRef<HTMLDivElement>(null);
   const [networkStatus, setNetworkStatus] = useState(() => {
     // Safe check for navigator.onLine in Tauri environment
@@ -51,15 +58,21 @@ const ChatInterface: React.FC = () => {
     return true;
   });
 
-  // Initialize adaptive streaming hook
-  const streaming = useAdaptiveStreaming();
+  // Initialize enhanced streaming hook
+  const streaming = useEnhancedStreaming();
 
   // Streaming state
   const isStreaming = streaming.streamingState.isStreaming;
   const streamingText = streaming.streamingState.streamedContent;
 
-  // Plugin panel state
-  const [showPluginPanel, setShowPluginPanel] = useState(false);
+  // Enhanced sidebar state
+  const [showSidebar, setShowSidebar] = useState(true);
+
+  // System settings state
+  const [showSystemSettings, setShowSystemSettings] = useState(false);
+
+  // Settings store
+  const { settings } = useSettingsStore();
 
   // Subscribe to model health status
   useEffect(() => {
@@ -87,12 +100,12 @@ const ChatInterface: React.FC = () => {
     };
   }, []);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or streaming content updates
   useEffect(() => {
     if (chatWindowRef.current) {
       chatWindowRef.current.scrollTop = chatWindowRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, streamingText]);
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim() || isLoading) return;
@@ -113,21 +126,37 @@ const ChatInterface: React.FC = () => {
       } else {
         // No plugin matched or plugin failed, use streaming LLM
         try {
-          // Start streaming response
-          const fullResponse = await streaming.startStream(
-            message,
-            // onChunk callback - streaming content is handled by the streaming hook
-            (chunk: string) => {
-              console.log('📝 Streaming chunk received:', chunk);
-            },
-            // onComplete callback
-            (fullContent: string) => {
-              console.log('✅ Streaming completed, full content length:', fullContent.length);
-            }
-          );
+          // Add a placeholder assistant message for streaming
+          const assistantMessageId = `assistant-${Date.now()}`;
+          addMessage('', 'assistant', assistantMessageId);
 
-          // Add the complete response as an assistant message
-          addMessage(fullResponse, 'assistant');
+          // Start enhanced streaming response with system prompt
+          const fullResponse = await streaming.startStream(message, {
+            mode: 'offline', // Force offline mode for Gemma 3n
+            model: 'gemma3n',
+            systemPrompt: settings.systemInstructions.systemPrompt,
+            onChunk: (accumulatedContent: string, metadata?: any) => {
+              console.log('📝 Streaming chunk received, length:', accumulatedContent.length);
+              // Update the placeholder message with accumulated content in real-time
+              updateMessage(assistantMessageId, {
+                content: accumulatedContent
+              });
+            },
+            onComplete: (fullContent: string, metadata?: any) => {
+              console.log('✅ Streaming completed, final length:', fullContent.length);
+              // Update the placeholder message with the final content
+              updateMessage(assistantMessageId, {
+                content: fullContent
+              });
+            },
+            onError: (error: string) => {
+              console.error('❌ Streaming error:', error);
+              // Update the placeholder message with error
+              updateMessage(assistantMessageId, {
+                content: `Error: ${error}`
+              });
+            }
+          });
         } catch (llmError) {
           console.error('LLM routing failed:', llmError);
 
@@ -140,7 +169,7 @@ const ChatInterface: React.FC = () => {
             errorMessage += '• Ollama is installed and running\n';
             errorMessage += '• The Gemma 3n model is available (`ollama pull gemma3n`)\n';
             errorMessage += '• The service is accessible at http://localhost:11434\n\n';
-            errorMessage += 'You can also try using online mode by adding `[use_online]` to your message.';
+            errorMessage += 'Please check the system status indicators above for more information.';
           } else if (errorStr.toLowerCase().includes('timeout')) {
             errorMessage += '⏱️ **Timeout**: The AI model is taking too long to respond. This might be due to:\n\n';
             errorMessage += '• High system load\n';
@@ -150,10 +179,10 @@ const ChatInterface: React.FC = () => {
           } else if (errorStr.toLowerCase().includes('model') && errorStr.toLowerCase().includes('not found')) {
             errorMessage += '🤖 **Model Not Found**: The Gemma 3n model is not available. Please install it with:\n\n';
             errorMessage += '```bash\nollama pull gemma3n\n```\n\n';
-            errorMessage += 'Or try online mode with `[use_online]` in your message.';
+            errorMessage += 'Please ensure the model is properly installed and Ollama is running.';
           } else {
             errorMessage += `❌ **Error Details**: ${errorStr}\n\n`;
-            errorMessage += 'Try using online mode by adding `[use_online]` to your message, or check the system status above.';
+            errorMessage += 'Please check the system status indicators above for more information.';
           }
 
           addMessage(errorMessage, 'assistant');
@@ -197,7 +226,12 @@ const ChatInterface: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900 pb-4">
+    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Enhanced Sidebar */}
+      {showSidebar && <EnhancedSidebar />}
+
+      {/* Main Chat Area */}
+      <div className="flex flex-col flex-1 pb-4">
       {/* Header */}
       <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
         <div className="flex items-center justify-between">
@@ -221,19 +255,15 @@ const ChatInterface: React.FC = () => {
             />
             <HardwareStatusBadge />
 
-            {/* LLM Provider Status */}
+            {/* Gemma 3n Status */}
             <div className="flex items-center space-x-2 px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
-              {llmPreferences.preferredProvider === 'local' ? (
-                <Cpu className="w-4 h-4 text-blue-600" />
-              ) : (
-                <Globe className="w-4 h-4 text-green-600" />
-              )}
+              <div className={`w-2 h-2 rounded-full ${
+                modelHealth?.isAvailable ? 'bg-green-500' : 'bg-red-500'
+              }`} />
+              <Cpu className="w-4 h-4 text-blue-600" />
               <span className="text-sm font-medium">
-                {llmPreferences.preferredProvider === 'local' ? 'Local (Gemma 3n)' : 'Online (Gemini)'}
+                Gemma 3n: {modelHealth?.isAvailable ? 'Active' : 'Offline'}
               </span>
-              {!networkStatus && (
-                <WifiOff className="w-4 h-4 text-red-500" />
-              )}
             </div>
 
             {/* Plugin Status & Manager Button */}
@@ -244,30 +274,10 @@ const ChatInterface: React.FC = () => {
                   Plugins {pluginsEnabled ? 'Enabled' : 'Disabled'}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowPluginPanel(true)}
-                className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                title="Plugin Manager"
-              >
-                <Package className="w-4 h-4" />
-              </button>
+
             </div>
 
-            {/* Provider Toggle */}
-            <button
-              type="button"
-              onClick={() => setPreferredProvider(llmPreferences.preferredProvider === 'local' ? 'online' : 'local')}
-              className="px-3 py-1 text-sm bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
-              title={`Switch to ${llmPreferences.preferredProvider === 'local' ? 'online' : 'local'} provider`}
-              disabled={!networkStatus && llmPreferences.preferredProvider === 'local'}
-            >
-              {networkStatus ? (
-                llmPreferences.preferredProvider === 'local' ? 'Use Online' : 'Use Local'
-              ) : (
-                'Offline'
-              )}
-            </button>
+
 
             {/* Plugin Toggle */}
             <button
@@ -281,6 +291,16 @@ const ChatInterface: React.FC = () => {
               title={`${pluginsEnabled ? 'Disable' : 'Enable'} plugins`}
             >
               {pluginsEnabled ? 'Disable Plugins' : 'Enable Plugins'}
+            </button>
+
+            {/* System Settings Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowSystemSettings(true)}
+              className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              title="System Settings & Prompts"
+            >
+              <Edit3 className="w-4 h-4" />
             </button>
 
             {/* Diagnostic Toggle */}
@@ -323,25 +343,10 @@ const ChatInterface: React.FC = () => {
                 key={message.id}
                 message={message}
                 isStreaming={shouldShowStreaming}
-                streamingText={shouldShowStreaming ? streamingText : ''}
+                streamingText=""
               />
             );
           })
-        )}
-
-        {/* Show streaming message if we're streaming but don't have a message yet */}
-        {isStreaming && streamingText && messages.length > 0 && messages[messages.length - 1].role !== 'assistant' && (
-          <MessageBubble
-            message={{
-              id: 'streaming-temp',
-              role: 'assistant',
-              content: '',
-              timestamp: new Date(),
-              isLoading: false
-            }}
-            isStreaming={true}
-            streamingText={streamingText}
-          />
         )}
 
         {/* Thinking Indicator - only show when loading, not when streaming */}
@@ -400,10 +405,12 @@ const ChatInterface: React.FC = () => {
         />
       )} */}
 
-      {/* Plugin Management Panel */}
-      <PluginPanel
-        isOpen={showPluginPanel}
-        onClose={() => setShowPluginPanel(false)}
+      </div>
+
+      {/* System Settings Panel */}
+      <SystemSettingsPanel
+        isOpen={showSystemSettings}
+        onClose={() => setShowSystemSettings(false)}
       />
     </div>
   );

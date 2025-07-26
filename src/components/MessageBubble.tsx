@@ -134,7 +134,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       )
                     }}
                   >
-                    {isStreaming && streamingText ? streamingText : message.content || ''}
+                    {message.content || streamingText || ''}
                   </ReactMarkdown>
                   {isStreaming && (
                     <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1" aria-label="Typing indicator"></span>
