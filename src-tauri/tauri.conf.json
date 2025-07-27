@@ -13,12 +13,23 @@
     "windows": [
       {
         "title": "Privacy AI Assistant",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "maxWidth": 2560,
+        "maxHeight": 1440,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "fullscreen": false,
+        "transparent": false,
+        "visible": true,
+        "skipTaskbar": false
       }
     ],
     "security": {
@@ -26,21 +37,39 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all"
-  },
-  "plugins": {
-    "shell": {
-      "open": true
-    },
-    "fs": {
-      "scope": ["**"]
-    },
-    "http": {
-      "scope": ["http://localhost:11434/**", "https://localhost:11434/**", "https://generativelanguage.googleapis.com/**"]
-    },
-    "store": {
-      "default": true
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "publisher": "Privacy AI Team",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "externalBin": [],
+    "copyright": "Copyright © 2024 Privacy AI Team",
+    "category": "Productivity",
+    "shortDescription": "Privacy-first AI assistant",
+    "longDescription": "A privacy-focused AI assistant with local gemma3n model support and hybrid online/offline capabilities for enhanced productivity and secure conversations.",
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "tsp": false,
+      "wix": {
+        "language": ["en-US"],
+        "template": null
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perMachine",
+        "languages": ["English"],
+        "template": null
+      }
     }
-  }
+  },
+  "plugins": {}
 }

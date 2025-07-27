@@ -81,10 +81,9 @@ const EnhancedVoiceModal: React.FC<EnhancedVoiceModalProps> = ({
   const handleSendTranscription = () => {
     const text = editableTranscription.trim();
     if (text) {
+      // FIXED: Only call onTranscriptionComplete, not both callbacks
+      // This prevents duplicate message sending
       onTranscriptionComplete(text);
-      if (onSendMessage) {
-        onSendMessage(text);
-      }
       onClose();
     }
   };

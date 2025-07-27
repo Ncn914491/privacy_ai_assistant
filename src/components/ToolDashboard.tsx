@@ -14,6 +14,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { cn } from '../utils/cn';
+import { toolMetricsService } from '../services/toolMetricsService';
 
 interface ToolData {
   id: string;
@@ -26,7 +27,7 @@ interface ToolData {
 
 interface ToolDashboardProps {
   toolName: string;
-  toolIcon: React.ComponentType<{ size?: number; className?: string }>;
+  toolIcon: any; // LucideIcon type
   toolColor: string;
   description: string;
   onClose: () => void;
@@ -120,14 +121,25 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
     setStatusMessage('Executing tool...');
 
     try {
-      const result = await onExecute({
-        toolData,
+      const result = await toolMetricsService.recordToolAction(
         toolName,
-        context: formatToolDataForLLM(toolData)
-      });
+        'execute',
+        async () => await onExecute({
+          toolData,
+          toolName,
+          context: formatToolDataForLLM(toolData)
+        })
+      );
 
       setStatus('success');
       setStatusMessage(result?.message || 'Tool executed successfully');
+
+      // Update health status on success
+      toolMetricsService.updateHealthStatus({
+        toolName,
+        isHealthy: true,
+        lastCheck: new Date()
+      });
 
       // Add visual feedback with animation
       setTimeout(() => {
@@ -137,6 +149,14 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
     } catch (error) {
       setStatus('error');
       setStatusMessage(error instanceof Error ? error.message : 'Execution failed');
+
+      // Update health status on error
+      toolMetricsService.updateHealthStatus({
+        toolName,
+        isHealthy: false,
+        lastCheck: new Date(),
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
 
       // Keep error message longer
       setTimeout(() => {

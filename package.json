@@ -17,14 +17,18 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\""
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.4.0",
     "@tauri-apps/plugin-http": "^2.3.0",
     "@tauri-apps/plugin-shell": "^2.3.0",
     "@tauri-apps/plugin-store": "^2.3.0",
+    "@types/crypto-js": "^4.2.2",
+    "@types/jsonwebtoken": "^9.0.10",
     "clsx": "^2.0.0",
+    "crypto-js": "^4.2.0",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.300.0",
-
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^9.0.1",
@@ -56,8 +60,6 @@
     "url": "https://github.com/your-username/privacy-ai-assistant.git"
   },
   "keywords": [
-
-
     "ai",
     "privacy",
     "desktop",

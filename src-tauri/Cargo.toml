@@ -18,6 +18,9 @@ tauri = { version = "2.0", features = [] }
 tauri-plugin-shell = "2.0"
 tauri-plugin-http = "2.0"
 tauri-plugin-store = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-dialog = "2.0"
+tauri-plugin-os = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -36,6 +39,11 @@ cpal = "0.15"
 hound = "3.5"
 rodio = "0.17"
 byteorder = "1.5"
+# JWT and web integration dependencies
+jsonwebtoken = "9.2"
+uuid = { version = "1.0", features = ["v4"] }
+scraper = "0.18"
+url = "2.4"
 
 [features]
 default = ["custom-protocol"]

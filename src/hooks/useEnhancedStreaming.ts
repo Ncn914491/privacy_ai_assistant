@@ -2,6 +2,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { TAURI_ENV } from '../utils/tauriDetection';
+import { ModelProvider, llmRouter } from '../core/agents/llmRouter';
+import { geminiApi } from '../services/geminiApi';
 import { useAppStore } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 
@@ -24,6 +26,40 @@ const formatToolContext = (toolContext: any): string => {
   }
 
   return String(toolContext);
+};
+
+// Helper function to determine if web search is needed
+const shouldPerformWebSearch = async (prompt: string): Promise<boolean> => {
+  const searchKeywords = [
+    'what is', 'who is', 'when did', 'where is', 'how to',
+    'latest', 'recent', 'current', 'news', 'today',
+    'search', 'find', 'lookup', 'research',
+    'definition', 'meaning', 'explain',
+    'weather', 'stock', 'price', 'rate'
+  ];
+
+  const lowerPrompt = prompt.toLowerCase();
+  return searchKeywords.some(keyword => lowerPrompt.includes(keyword));
+};
+
+// Helper function to format web search results
+const formatWebSearchContext = (searchResults: any): string => {
+  if (!searchResults.results || searchResults.results.length === 0) {
+    return '';
+  }
+
+  let context = `Web search results for "${searchResults.query}":\n\n`;
+
+  searchResults.results.slice(0, 3).forEach((result: any, index: number) => {
+    context += `${index + 1}. ${result.title}\n`;
+    context += `   Source: ${result.source}\n`;
+    context += `   URL: ${result.url}\n`;
+    context += `   Summary: ${result.snippet}\n\n`;
+  });
+
+  context += `Search completed in ${searchResults.search_time_ms}ms using sources: ${searchResults.sources_used.join(', ')}\n`;
+
+  return context;
 };
 
 interface EnhancedStreamingState {
@@ -148,10 +184,34 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
         const mode = 'offline'; // Always use offline/local mode
         const model = 'gemma3n:latest'; // EXCLUSIVE: Always use gemma3n:latest model
 
-        // FIXED: Prepare enhanced prompt with system prompt and tool context
+        // ENHANCED: Prepare enhanced prompt with system prompt, tool context, and web search
         let enhancedPrompt = prompt;
+
+        // Check if query requires web search
+        const needsWebSearch = await shouldPerformWebSearch(prompt);
+        let webSearchContext = '';
+
+        if (needsWebSearch) {
+          try {
+            console.log('🔍 [STREAMING] Query requires web search, fetching context...');
+            const searchResults = await invoke('search_web', { query: prompt }) as any;
+
+            if (searchResults.results && searchResults.results.length > 0) {
+              webSearchContext = formatWebSearchContext(searchResults);
+              console.log('✅ [STREAMING] Web search context added:', webSearchContext.length, 'characters');
+            }
+          } catch (error) {
+            console.warn('⚠️ [STREAMING] Web search failed:', error);
+          }
+        }
+
         if (options?.systemPrompt) {
           enhancedPrompt = `${options.systemPrompt}\n\nUser: ${prompt}`;
+        }
+
+        // Add web search context if available
+        if (webSearchContext) {
+          enhancedPrompt = `${enhancedPrompt}\n\nWeb Search Context:\n${webSearchContext}`;
         }
 
         // FIXED: Add tool context if available with proper formatting
@@ -169,22 +229,31 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
           hasToolContext: !!options?.toolContext
         });
 
-        // FIXED: Execute streaming based on environment with proper error handling
+        // ENHANCED: Execute streaming with hybrid model routing
         if (TAURI_ENV.isTauri) {
-          console.log('🔧 [STREAMING] Using Tauri streaming...');
-          const result = await executeTauriStreaming(enhancedPrompt, {
-            model,
-            systemPrompt: options?.systemPrompt,
-            onChunk: (chunk: string, metadata?: any) => {
-              // FIXED: Ensure chunk callback is called with proper isolation
-              if (options?.onChunk) {
-                try {
-                  options.onChunk(chunk, metadata);
-                } catch (error) {
-                  console.error('❌ [STREAMING] Error in onChunk callback:', error);
+          console.log('🔧 [STREAMING] Using hybrid model routing...');
+
+          // Get optimal model selection
+          const complexity = llmRouter.calculateComplexity(enhancedPrompt, options?.toolContext);
+          const routingDecision = await llmRouter.selectOptimalModel(complexity);
+
+          console.log('🤖 [STREAMING] Routing decision:', routingDecision);
+
+          let result: string;
+
+          if (routingDecision.selectedProvider === ModelProvider.ONLINE_GEMINI) {
+            // Use online Gemini API
+            result = await executeGeminiStreaming(enhancedPrompt, {
+              systemPrompt: options?.systemPrompt,
+              onChunk: (chunk: string, metadata?: any) => {
+                if (options?.onChunk) {
+                  try {
+                    options.onChunk(chunk, metadata);
+                  } catch (error) {
+                    console.error('❌ [STREAMING] Error in onChunk callback:', error);
+                  }
                 }
-              }
-            },
+              },
             onComplete: (fullContent: string, metadata?: any) => {
               // FIXED: Ensure complete callback is called with proper isolation
               if (options?.onComplete) {
@@ -195,17 +264,67 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
                 }
               }
             },
-            onError: (error: string) => {
-              // FIXED: Ensure error callback is called with proper isolation
-              if (options?.onError) {
-                try {
-                  options.onError(error);
-                } catch (callbackError) {
-                  console.error('❌ [STREAMING] Error in onError callback:', callbackError);
+              onError: async (error: string) => {
+                // Try fallback if available
+                if (routingDecision.fallbackProvider === ModelProvider.LOCAL_GEMMA3N) {
+                  console.log('🔄 [STREAMING] Attempting fallback to local model...');
+                  try {
+                    const fallbackResult = await executeTauriStreaming(enhancedPrompt, {
+                      model: 'gemma3n:latest',
+                      systemPrompt: options?.systemPrompt,
+                      onChunk: options?.onChunk,
+                      onComplete: options?.onComplete,
+                      onError: options?.onError
+                    });
+                    return fallbackResult;
+                  } catch (fallbackError) {
+                    console.error('❌ [STREAMING] Fallback also failed:', fallbackError);
+                  }
+                }
+
+                if (options?.onError) {
+                  try {
+                    options.onError(error);
+                  } catch (callbackError) {
+                    console.error('❌ [STREAMING] Error in onError callback:', callbackError);
+                  }
                 }
               }
-            }
-          });
+            });
+          } else {
+            // Use local Tauri streaming
+            result = await executeTauriStreaming(enhancedPrompt, {
+              model: routingDecision.model,
+              systemPrompt: options?.systemPrompt,
+              onChunk: (chunk: string, metadata?: any) => {
+                if (options?.onChunk) {
+                  try {
+                    options.onChunk(chunk, metadata);
+                  } catch (error) {
+                    console.error('❌ [STREAMING] Error in onChunk callback:', error);
+                  }
+                }
+              },
+              onComplete: (fullContent: string, metadata?: any) => {
+                if (options?.onComplete) {
+                  try {
+                    options.onComplete(fullContent, metadata);
+                  } catch (error) {
+                    console.error('❌ [STREAMING] Error in onComplete callback:', error);
+                  }
+                }
+              },
+              onError: (error: string) => {
+                if (options?.onError) {
+                  try {
+                    options.onError(error);
+                  } catch (callbackError) {
+                    console.error('❌ [STREAMING] Error in onError callback:', callbackError);
+                  }
+                }
+              }
+            });
+          }
           
           // FIXED: Resolve with the result from Tauri streaming
           resolve(result);
@@ -363,6 +482,126 @@ export const useEnhancedStreaming = (): UseEnhancedStreamingReturn => {
       options?.onError?.(errorMessage);
       reject(error);
     }
+  };
+
+  // Enhanced Gemini Streaming Implementation
+  const executeGeminiStreaming = async (
+    prompt: string,
+    options?: {
+      systemPrompt?: string;
+      onChunk?: (chunk: string, metadata?: any) => void;
+      onComplete?: (fullContent: string, metadata?: any) => void;
+      onError?: (error: string) => void;
+    }
+  ): Promise<string> => {
+    return new Promise(async (resolve, reject) => {
+      console.log('🌐 [GEMINI STREAMING] Starting Gemini streaming...');
+
+      try {
+        // Reset content accumulation for each new stream
+        fullContentRef.current = '';
+        tokenCountRef.current = 0;
+        startTimeRef.current = Date.now();
+
+        const streamId = `gemini_stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        currentStreamIdRef.current = streamId;
+
+        console.log(`🌐 [GEMINI STREAMING] Stream ID: ${streamId}`);
+
+        // Set streaming state immediately
+        setStreamingState({
+          isStreaming: true,
+          streamedContent: '',
+          error: null,
+          currentStreamId: streamId,
+          totalTokens: 0,
+          streamingSpeed: 0,
+          estimatedTimeRemaining: 0,
+        });
+
+        // Start Gemini streaming
+        const result = await geminiApi.startStream(prompt, {
+          streamId,
+          systemPrompt: options?.systemPrompt,
+          onChunk: (accumulatedContent: string, metadata?: any) => {
+            if (!isPausedRef.current && currentStreamIdRef.current === streamId) {
+              fullContentRef.current = accumulatedContent;
+              tokenCountRef.current = metadata?.tokens || Math.ceil(accumulatedContent.length / 4);
+
+              // Calculate streaming speed
+              const elapsed = Date.now() - startTimeRef.current;
+              const speed = elapsed > 0 ? (tokenCountRef.current / elapsed) * 1000 : 0;
+
+              // Update streaming state
+              setStreamingState(prev => ({
+                ...prev,
+                streamedContent: accumulatedContent,
+                totalTokens: tokenCountRef.current,
+                streamingSpeed: speed,
+                estimatedTimeRemaining: 0
+              }));
+
+              // Call chunk callback
+              options?.onChunk?.(accumulatedContent, {
+                ...metadata,
+                totalTokens: tokenCountRef.current,
+                speed,
+                model: 'gemini-1.5-flash',
+                provider: 'online_gemini'
+              });
+
+              scrollToBottom();
+            }
+          },
+          onComplete: (fullContent: string, metadata?: any) => {
+            console.log('✅ [GEMINI STREAMING] Stream completed successfully');
+
+            setStreamingState(prev => ({
+              ...prev,
+              isStreaming: false,
+              streamedContent: fullContent,
+              totalTokens: metadata?.tokens || tokenCountRef.current
+            }));
+
+            options?.onComplete?.(fullContent, {
+              ...metadata,
+              model: 'gemini-1.5-flash',
+              provider: 'online_gemini'
+            });
+
+            currentStreamIdRef.current = null;
+            resolve(fullContent);
+          },
+          onError: (error: string) => {
+            console.error('❌ [GEMINI STREAMING] Stream failed:', error);
+
+            setStreamingState(prev => ({
+              ...prev,
+              isStreaming: false,
+              error: error
+            }));
+
+            options?.onError?.(error);
+            currentStreamIdRef.current = null;
+            reject(new Error(error));
+          }
+        });
+
+      } catch (error) {
+        console.error('❌ [GEMINI STREAMING] Streaming error:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        setStreamingState(prev => ({
+          ...prev,
+          isStreaming: false,
+          error: errorMessage,
+        }));
+
+        options?.onError?.(errorMessage);
+        currentStreamIdRef.current = null;
+        reject(error);
+      }
+    });
   };
 
   // Rewritten Tauri Streaming Implementation - Fixed Parameter Issue

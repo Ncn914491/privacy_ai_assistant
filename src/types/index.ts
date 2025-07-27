@@ -10,7 +10,7 @@ export interface Message {
 
 
 
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
 
 
 
@@ -24,8 +24,15 @@ export interface Message {
 
   error?: string;
 
-
-
+  metadata?: {
+    isStreaming?: boolean;
+    isPlaceholder?: boolean;
+    provider?: string;
+    model?: string;
+    tokens?: number;
+    executionTime?: number;
+    [key: string]: any;
+  };
 }
 
 
@@ -853,11 +860,11 @@ export interface PluginRegistry {
 
 
 
-export type LLMProvider = 'local' | 'online';
+export type LLMProvider = 'local' | 'online' | 'plugin';
 
 
 
-export type LLMModel = 'gemma3n' | 'gemini-api';
+export type LLMModel = 'gemma3n' | 'gemma3n:latest' | 'gemini-api' | 'gemini-1.5-flash';
 
 
 
@@ -965,17 +972,7 @@ export interface NetworkStatus {
 
 
 
-export interface StreamingConfig {
 
-  enabled: boolean;
-
-  chunkSize: number;
-
-  delayMs: number;
-
-  autoScroll: boolean;
-
-}
 
 
 
@@ -997,21 +994,7 @@ export interface StreamingResponse {
 
 
 
-export interface VoiceConfig {
 
-  sttEnabled: boolean;
-
-  ttsEnabled: boolean;
-
-  voiceProvider: 'web-speech' | 'vosk' | 'whisper';
-
-  ttsVoice?: string;
-
-  sttLanguage: string;
-
-  autoPlayTTS: boolean;
-
-}
 
 
 
@@ -1035,35 +1018,7 @@ export interface VoiceRecordingState {
 
 
 
-export interface SystemInstructions {
 
-  systemPrompt: string;
-
-  promptTemplate: string;
-
-  behaviorSettings: {
-
-    responseStyle: 'concise' | 'detailed' | 'conversational';
-
-    creativityLevel: number; // 0-1
-
-    useEmojis: boolean;
-
-    includeThinking: boolean;
-
-  };
-
-  contextSettings: {
-
-    maxContextLength: number;
-
-    includeSystemInfo: boolean;
-
-    includeChatHistory: boolean;
-
-  };
-
-}
 
 
 
@@ -1135,18 +1090,12 @@ export interface PluginState {
 
 
 
-export interface PluginRegistry {
-
+export interface EnhancedPluginRegistry {
   [pluginName: string]: {
-
     plugin: Plugin;
-
     manifest: EnhancedPluginManifest;
-
     state: PluginState;
-
   };
-
 }
 
 // ===== STREAMING TYPES =====
@@ -1166,7 +1115,7 @@ export interface VoiceRecordingState {
   isProcessing: boolean;
   transcription: string;
   confidence: number;
-  error: string | null;
+  error?: string;
 }
 
 export interface EnhancedVoiceState {
@@ -1174,7 +1123,7 @@ export interface EnhancedVoiceState {
   isProcessing: boolean;
   transcription: string;
   confidence: number;
-  error: string | null;
+  error?: string;
   micPermission: 'granted' | 'denied' | 'prompt';
 }
 

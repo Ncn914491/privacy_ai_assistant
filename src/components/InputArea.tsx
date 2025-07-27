@@ -4,6 +4,7 @@ import { cn } from '../utils/cn';
 import { useAppStore } from '../stores/chatStore';
 import { llmRouter } from '../core/agents/llmRouter';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
+import VoiceChat from './VoiceChat';
 
 interface InputAreaProps {
   onSendMessage: (message: string) => void;
@@ -21,6 +22,7 @@ const InputArea: React.FC<InputAreaProps> = ({
   placeholder = "Type your message..."
 }) => {
   const [currentInput, setCurrentInput] = useState('');
+  const [showVoiceChat, setShowVoiceChat] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Feature flags for voice functionality
@@ -57,6 +59,22 @@ const InputArea: React.FC<InputAreaProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
+    }
+  };
+
+  // Voice chat handlers
+  const handleVoiceToggle = () => {
+    setShowVoiceChat(!showVoiceChat);
+  };
+
+  const handleTranscriptUpdate = (transcript: string, isUser: boolean) => {
+    if (isUser) {
+      // User speech - add to input or send directly
+      setCurrentInput(transcript);
+      onSendMessage(transcript);
+    } else {
+      // AI response - this will be handled by the main chat interface
+      console.log('🤖 [Voice] AI response:', transcript);
     }
   };
 
@@ -181,18 +199,20 @@ const InputArea: React.FC<InputAreaProps> = ({
           />
         </div>
         
-        {/* VOICE BUTTON - Conditionally rendered based on feature flags */}
-        {isVoiceEnabled && onVoiceRecord && (
+        {/* VOICE CHAT TOGGLE BUTTON */}
+        {isVoiceEnabled && (
           <button
             type="button"
-            onClick={onVoiceRecord}
-            disabled={disabled || isLoading}
+            onClick={handleVoiceToggle}
+            disabled={disabled}
             className={cn(
-              "p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              "rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              "p-2 rounded-lg transition-colors",
+              showVoiceChat
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "bg-blue-600 text-white hover:bg-blue-700",
+              disabled && "opacity-50 cursor-not-allowed"
             )}
-            title="Voice input"
+            title={showVoiceChat ? "Close voice chat" : "Open voice chat"}
           >
             <Mic className="w-5 h-5" />
           </button>
@@ -212,6 +232,18 @@ const InputArea: React.FC<InputAreaProps> = ({
           <Send className="w-5 h-5" />
         </button>
       </div>
+
+      {/* Voice Chat Component */}
+      {showVoiceChat && (
+        <div className="mt-4">
+          <VoiceChat
+            isVisible={showVoiceChat}
+            onToggle={handleVoiceToggle}
+            onTranscriptUpdate={handleTranscriptUpdate}
+            className="border border-gray-200 dark:border-gray-700 rounded-lg"
+          />
+        </div>
+      )}
     </div>
   );
 };

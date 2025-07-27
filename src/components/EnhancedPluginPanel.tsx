@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../stores/chatStore';
 import { EnhancedPluginManifest, PluginState } from '../types';
+import ToolDashboard from './ToolDashboard';
 
 interface PluginCardProps {
   pluginId: string;

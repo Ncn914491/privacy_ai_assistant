@@ -25,13 +25,22 @@ import {
   Globe,
   FolderOpen,
   Eye,
-  Zap
+  Zap,
+  Activity
 } from 'lucide-react';
 import { useAppStore } from '../stores/chatStore';
 import { useEnhancedChatStore } from '../stores/enhancedChatStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { llmRouter, ModelProvider } from '../core/agents/llmRouter';
 import { ChatSessionSummary } from '../types';
 import ToolDashboard from './ToolDashboard';
+import BrowserDashboard from './dashboards/BrowserDashboard';
+import TodoDashboard from './dashboards/TodoDashboard';
+import NotesDashboard from './dashboards/NotesDashboard';
+import PersonalInfoDashboard from './dashboards/PersonalInfoDashboard';
+import ModelSelector from './ModelSelector';
+import EmbeddedBrowser from './EmbeddedBrowser';
+import CapabilitiesStatusPanel from './CapabilitiesStatusPanel';
 
 interface ChatItemProps {
   session: ChatSessionSummary;
@@ -278,9 +287,22 @@ const EnhancedSidebar: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showPluginSidebar, setShowPluginSidebar] = useState(false);
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [extractedContent, setExtractedContent] = useState<any>(null);
+  const [showCapabilities, setShowCapabilities] = useState(false);
+  const [currentProvider, setCurrentProvider] = useState<ModelProvider>(() => {
+    try {
+      return llmRouter.getCurrentProvider();
+    } catch (error) {
+      console.warn('Failed to get current provider, defaulting to LOCAL_GEMMA3N:', error);
+      return ModelProvider.LOCAL_GEMMA3N;
+    }
+  });
   
   const { preferences, setTheme } = useAppStore();
   const { settings, updateUIPreferences } = useSettingsStore();
+
+  // Get store values first
   const {
     chatSummaries,
     chatSessions,
@@ -293,8 +315,20 @@ const EnhancedSidebar: React.FC = () => {
     deleteChat,
     archiveChat,
     exportAllChats,
-    isLoading
+    isLoading,
+    isInitialized,
+    initializeStore
   } = useEnhancedChatStore();
+
+  // Initialize chat store when component mounts
+  useEffect(() => {
+    if (!isInitialized) {
+      console.log('🔄 Initializing chat store from sidebar...');
+      initializeStore().catch(error => {
+        console.error('Failed to initialize chat store:', error);
+      });
+    }
+  }, [isInitialized, initializeStore]);
 
   // Plugin icons mapping
   const pluginIcons = {
@@ -364,6 +398,15 @@ const EnhancedSidebar: React.FC = () => {
   const handleThemeToggle = () => {
     const newTheme = preferences.theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
+  };
+
+  const handleBrowserToggle = () => {
+    setShowBrowser(!showBrowser);
+  };
+
+  const handleContentExtracted = (content: any) => {
+    setExtractedContent(content);
+    console.log('📄 [Sidebar] Content extracted for LLM context:', content);
   };
 
   const handleNewChat = async () => {
@@ -480,10 +523,69 @@ const EnhancedSidebar: React.FC = () => {
     }
   };
 
-  // Filter chats based on search query
-  const filteredChats = searchQuery.trim() 
-    ? searchChats(searchQuery)
-    : getRecentChats(50);
+  // Handle hybrid mode toggle
+  const handleHybridModeToggle = () => {
+    try {
+      const newProvider = currentProvider === ModelProvider.LOCAL_GEMMA3N
+        ? ModelProvider.HYBRID_AUTO
+        : ModelProvider.LOCAL_GEMMA3N;
+
+      llmRouter.setProvider(newProvider);
+      setCurrentProvider(newProvider);
+
+      console.log('🔄 Switched model provider to:', newProvider);
+    } catch (error) {
+      console.error('Failed to toggle hybrid mode:', error);
+    }
+  };
+
+  // Filter chats based on search query with defensive checks
+  const filteredChats = React.useMemo(() => {
+    if (!isInitialized || !chatSummaries) {
+      return [];
+    }
+
+    try {
+      return searchQuery.trim()
+        ? searchChats(searchQuery)
+        : getRecentChats(50);
+    } catch (error) {
+      console.error('Error filtering chats:', error);
+      return [];
+    }
+  }, [searchQuery, chatSummaries, isInitialized, searchChats, getRecentChats]);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('📊 Chat summaries count:', chatSummaries?.length || 0);
+    console.log('📊 Filtered chats count:', filteredChats.length);
+    console.log('📊 Is initialized:', isInitialized);
+    console.log('📊 Chat summaries:', chatSummaries);
+  }, [chatSummaries, filteredChats, isInitialized]);
+
+  // Show loading state if store is not initialized
+  if (!isInitialized) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="fixed top-4 left-4 z-50 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+        >
+          {showSidebar ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+        </button>
+
+        {showSidebar && (
+          <div className="fixed top-0 left-0 h-full w-80 bg-white dark:bg-gray-900 shadow-lg flex items-center justify-center z-40">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600 dark:text-gray-400">Initializing chat store...</p>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
@@ -502,7 +604,7 @@ const EnhancedSidebar: React.FC = () => {
         )}
       >
         {/* Main Sidebar */}
-        <div className="w-80 bg-white dark:bg-gray-900 shadow-lg flex flex-col border-r border-gray-200 dark:border-gray-700">
+        <div className="w-80 h-full bg-white dark:bg-gray-900 shadow-lg flex flex-col border-r border-gray-200 dark:border-gray-700">
           {/* Header */}
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
             <button
@@ -526,10 +628,94 @@ const EnhancedSidebar: React.FC = () => {
                 className="w-full pl-10 pr-4 py-2 text-sm bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+
+            {/* Hybrid Mode Toggle */}
+            <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  "w-2 h-2 rounded-full",
+                  currentProvider === ModelProvider.LOCAL_GEMMA3N ? "bg-blue-500" : "bg-green-500"
+                )} />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {currentProvider === ModelProvider.LOCAL_GEMMA3N ? "Local Only" : "Hybrid Mode"}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleHybridModeToggle}
+                className={cn(
+                  "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+                  currentProvider === ModelProvider.LOCAL_GEMMA3N
+                    ? "bg-gray-300 dark:bg-gray-600"
+                    : "bg-green-500"
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                    currentProvider === ModelProvider.LOCAL_GEMMA3N ? "translate-x-1" : "translate-x-6"
+                  )}
+                />
+              </button>
+            </div>
+
+            {/* Tool Icons */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                Quick Tools
+              </span>
+              <div className="flex items-center gap-1">
+                {Object.entries(pluginIcons).map(([toolName, IconComponent]) => (
+                  <button
+                    key={toolName}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTool(toolName);
+                      setShowPluginSidebar(true);
+                    }}
+                    className={cn(
+                      "p-2 rounded-lg transition-colors",
+                      selectedTool === toolName
+                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                        : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    )}
+                    title={toolName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                  >
+                    <IconComponent size={16} />
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setShowBrowser(!showBrowser)}
+                  className={cn(
+                    "p-2 rounded-lg transition-colors",
+                    showBrowser
+                      ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400"
+                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  )}
+                  title="Web Browser"
+                >
+                  <Globe size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCapabilities(!showCapabilities)}
+                  className={cn(
+                    "p-2 rounded-lg transition-colors",
+                    showCapabilities
+                      ? "bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
+                      : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  )}
+                  title="System Capabilities"
+                >
+                  <Activity size={16} />
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Chat List */}
-          <div className="flex-1 overflow-y-auto p-2">
+          <div className="flex-1 overflow-y-auto p-2 min-h-0">
             {filteredChats.length === 0 ? (
               <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                 <MessageSquare size={48} className="mx-auto mb-4 opacity-50" />
@@ -559,8 +745,34 @@ const EnhancedSidebar: React.FC = () => {
             )}
           </div>
 
+          {/* Model Selector */}
+          <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+            <ModelSelector
+              onProviderChange={(provider) => {
+                console.log('🤖 [Sidebar] Model provider changed:', provider);
+              }}
+            />
+          </div>
+
+          {/* Capabilities Status Panel */}
+          <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+            <CapabilitiesStatusPanel
+              isCollapsed={!showCapabilities}
+              onToggle={() => setShowCapabilities(!showCapabilities)}
+            />
+          </div>
+
           {/* Footer */}
           <div className="border-t border-gray-200 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={handleBrowserToggle}
+              className="flex items-center gap-3 p-4 w-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <span><Globe size={18} /></span>
+              <span className="text-sm">{showBrowser ? 'Hide Browser' : 'Show Browser'}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleThemeToggle}
@@ -622,17 +834,52 @@ const EnhancedSidebar: React.FC = () => {
         />
       )}
 
-      {/* Tool Dashboard Modal */}
+      {/* Tool Dashboard Modals */}
       {selectedTool && (
-        <ToolDashboard
-          toolName={availablePlugins.find(p => p.id === selectedTool)?.name || selectedTool}
-          toolIcon={availablePlugins.find(p => p.id === selectedTool)?.icon || Package}
-          toolColor={availablePlugins.find(p => p.id === selectedTool)?.color || 'text-gray-600'}
-          description={availablePlugins.find(p => p.id === selectedTool)?.description || 'Tool dashboard'}
-          onClose={() => setSelectedTool(null)}
-          onExecute={handleToolExecute}
-        />
+        <>
+          {selectedTool === 'webBrowser' && (
+            <BrowserDashboard
+              onClose={() => setSelectedTool(null)}
+              onExecute={handleToolExecute}
+            />
+          )}
+          {selectedTool === 'todoList' && (
+            <TodoDashboard
+              onClose={() => setSelectedTool(null)}
+              onExecute={handleToolExecute}
+            />
+          )}
+          {selectedTool === 'noteTaker' && (
+            <NotesDashboard
+              onClose={() => setSelectedTool(null)}
+              onExecute={handleToolExecute}
+            />
+          )}
+          {selectedTool === 'personalInfo' && (
+            <PersonalInfoDashboard
+              onClose={() => setSelectedTool(null)}
+              onExecute={handleToolExecute}
+            />
+          )}
+          {!['webBrowser', 'todoList', 'noteTaker', 'personalInfo'].includes(selectedTool) && (
+            <ToolDashboard
+              toolName={availablePlugins.find(p => p.id === selectedTool)?.name || selectedTool}
+              toolIcon={availablePlugins.find(p => p.id === selectedTool)?.icon || Package}
+              toolColor={availablePlugins.find(p => p.id === selectedTool)?.color || 'text-gray-600'}
+              description={availablePlugins.find(p => p.id === selectedTool)?.description || 'Tool dashboard'}
+              onClose={() => setSelectedTool(null)}
+              onExecute={handleToolExecute}
+            />
+          )}
+        </>
       )}
+
+      {/* Embedded Browser */}
+      <EmbeddedBrowser
+        isVisible={showBrowser}
+        onToggle={handleBrowserToggle}
+        onContentExtracted={handleContentExtracted}
+      />
     </>
   );
 };

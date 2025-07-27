@@ -12,6 +12,7 @@ import { useSettingsStore } from './stores/settingsStore';
 import { useEnhancedChatStore } from './stores/enhancedChatStore';
 import { cn } from './utils/cn';
 import './styles/globals.css';
+import './styles/animations.css';
 import { SystemInfo, AppVersion } from './types';
 import { ensureEnvironment, EnvironmentCapabilities, TAURI_ENV } from './utils/tauriDetection';
 import { appLogger, tauriLogger } from './utils/logger';

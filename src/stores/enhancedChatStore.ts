@@ -33,6 +33,11 @@ const initChatStore = async () => {
 interface EnhancedChatState extends MultiChatState {
   isInitialized: boolean;
   lastSyncTime: Date | null;
+  // Context window management
+  tokenCount: number;
+  maxTokens: number;
+  isOptimizing: boolean;
+  lastOptimization: Date | null;
 }
 
 interface EnhancedChatActions extends ChatActions, ChatSessionActions {
@@ -59,6 +64,12 @@ interface EnhancedChatActions extends ChatActions, ChatSessionActions {
   // Export/Import functionality
   exportAllChats: () => Promise<string>;
   importChatsFromJson: (jsonData: string) => Promise<void>;
+
+  // Context window management
+  calculateTokenUsage: (messages?: Message[]) => number;
+  pruneOldMessages: () => Promise<void>;
+  clearAllContext: () => void;
+  updateTokenCount: () => void;
 }
 
 interface EnhancedChatStore extends EnhancedChatState, EnhancedChatActions {}
@@ -76,6 +87,11 @@ export const useEnhancedChatStore = create<EnhancedChatStore>()(
       chatSummaries: [],
       isInitialized: false,
       lastSyncTime: null,
+      // Context window management
+      tokenCount: 0,
+      maxTokens: 32768,
+      isOptimizing: false,
+      lastOptimization: null,
 
       // Initialize store
       initializeStore: async () => {
@@ -108,7 +124,10 @@ export const useEnhancedChatStore = create<EnhancedChatStore>()(
           console.log('✅ Enhanced chat store initialized');
         } catch (error) {
           console.error('❌ Failed to initialize chat store:', error);
-          set({ error: `Failed to initialize: ${error}` });
+          set({
+            error: `Failed to initialize: ${error}`,
+            isInitialized: true // Set to true to prevent UI from being stuck in loading state
+          });
         }
       },
 
@@ -700,6 +719,181 @@ export const useEnhancedChatStore = create<EnhancedChatStore>()(
       bulkImportChats: async (chats: ChatSession[]): Promise<void> => {
         // Implementation will be added
       },
+
+      // Context window management methods
+      calculateTokenUsage: (messages?: Message[]): number => {
+        const state = get();
+        const messagesToCount = messages || state.messages;
+
+        if (!messagesToCount || messagesToCount.length === 0) {
+          return 0;
+        }
+
+        // Estimate tokens using 4 characters per token approximation
+        let totalTokens = 0;
+
+        messagesToCount.forEach(message => {
+          // Count tokens in message content
+          totalTokens += Math.ceil(message.content.length / 4);
+
+          // Add small overhead for message metadata
+          totalTokens += 10; // Role, timestamp, etc.
+        });
+
+        // Add tokens for system instructions and context
+        const systemInstructionsTokens = 100; // Estimated
+        const contextOverheadTokens = 50; // Estimated
+
+        totalTokens += systemInstructionsTokens + contextOverheadTokens;
+
+        return totalTokens;
+      },
+
+      updateTokenCount: (): void => {
+        const state = get();
+        const newTokenCount = state.calculateTokenUsage();
+
+        set({ tokenCount: newTokenCount });
+
+        // Auto-prune if we're at 90% capacity
+        if (newTokenCount >= state.maxTokens * 0.9) {
+          console.log('🧹 [Context] Auto-pruning triggered at 90% capacity');
+          state.pruneOldMessages();
+        }
+      },
+
+      pruneOldMessages: async (): Promise<void> => {
+        const state = get();
+        const activeChatId = state.activeChatId;
+
+        if (!activeChatId || state.isOptimizing) {
+          return;
+        }
+
+        set({ isOptimizing: true });
+
+        try {
+          console.log('🧹 [Context] Starting message pruning...');
+
+          const currentSession = state.chatSessions[activeChatId];
+          if (!currentSession || !currentSession.messages) {
+            return;
+          }
+
+          const messages = [...currentSession.messages];
+          const totalMessages = messages.length;
+
+          if (totalMessages <= 10) {
+            // Don't prune if we have very few messages
+            return;
+          }
+
+          // Preserve system instructions (if any)
+          const systemMessages = messages.filter(msg => msg.role === 'system');
+
+          // Get the last 5 message pairs (10 messages)
+          const recentMessages = messages.slice(-10);
+
+          // Find current conversation thread (messages from last 30 minutes)
+          const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+          const currentThreadMessages = messages.filter(msg =>
+            new Date(msg.timestamp) > thirtyMinutesAgo
+          );
+
+          // Combine preserved messages (remove duplicates)
+          const preservedMessageIds = new Set();
+          const preservedMessages: Message[] = [];
+
+          // Add system messages
+          systemMessages.forEach(msg => {
+            if (!preservedMessageIds.has(msg.id)) {
+              preservedMessages.push(msg);
+              preservedMessageIds.add(msg.id);
+            }
+          });
+
+          // Add recent messages
+          recentMessages.forEach(msg => {
+            if (!preservedMessageIds.has(msg.id)) {
+              preservedMessages.push(msg);
+              preservedMessageIds.add(msg.id);
+            }
+          });
+
+          // Add current thread messages
+          currentThreadMessages.forEach(msg => {
+            if (!preservedMessageIds.has(msg.id)) {
+              preservedMessages.push(msg);
+              preservedMessageIds.add(msg.id);
+            }
+          });
+
+          // Sort preserved messages by timestamp
+          preservedMessages.sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+
+          const prunedCount = totalMessages - preservedMessages.length;
+
+          // Update the session with pruned messages
+          const updatedSession = {
+            ...currentSession,
+            messages: preservedMessages,
+            lastActivity: new Date()
+          };
+
+          set({
+            chatSessions: {
+              ...state.chatSessions,
+              [activeChatId]: updatedSession
+            },
+            messages: preservedMessages,
+            lastOptimization: new Date()
+          });
+
+          // Update token count
+          const newTokenCount = state.calculateTokenUsage(preservedMessages);
+          set({ tokenCount: newTokenCount });
+
+          console.log(`✅ [Context] Pruned ${prunedCount} messages, kept ${preservedMessages.length}`);
+          console.log(`📊 [Context] Token count reduced to ${newTokenCount}`);
+
+        } catch (error) {
+          console.error('❌ [Context] Failed to prune messages:', error);
+        } finally {
+          set({ isOptimizing: false });
+        }
+      },
+
+      clearAllContext: (): void => {
+        const state = get();
+        const activeChatId = state.activeChatId;
+
+        if (!activeChatId) {
+          return;
+        }
+
+        console.log('🗑️ [Context] Clearing all context...');
+
+        // Clear messages for active chat
+        const updatedSession = {
+          ...state.chatSessions[activeChatId],
+          messages: [],
+          lastActivity: new Date()
+        };
+
+        set({
+          chatSessions: {
+            ...state.chatSessions,
+            [activeChatId]: updatedSession
+          },
+          messages: [],
+          tokenCount: 0,
+          lastOptimization: new Date()
+        });
+
+        console.log('✅ [Context] All context cleared');
+      }
     }),
     {
       name: 'enhanced-chat-storage',
@@ -708,6 +902,8 @@ export const useEnhancedChatStore = create<EnhancedChatStore>()(
         chatSessions: state.chatSessions,
         chatSummaries: state.chatSummaries,
         currentInput: state.currentInput,
+        tokenCount: state.tokenCount,
+        lastOptimization: state.lastOptimization,
       }),
     }
   )

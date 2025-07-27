@@ -1261,3 +1261,32 @@ pub async fn test_vosk_installation() -> Result<String, String> {
 
     Ok(format!("Vosk installation OK: {}", test_output.trim()))
 }
+
+// Continuous voice chat command for real-time processing
+#[command]
+pub async fn start_continuous_voice_chat(stream_id: String) -> Result<String, String> {
+    info!("🎤 [Continuous Voice] Starting continuous voice chat with stream ID: {}", stream_id);
+
+    // This is a placeholder implementation
+    // In a real implementation, this would:
+    // 1. Start continuous audio recording
+    // 2. Process audio chunks in real-time
+    // 3. Emit events for transcription updates
+    // 4. Handle silence detection
+
+    // For now, we'll use the existing vosk_transcribe functionality
+    // and simulate continuous processing
+
+    let stream_id_clone = stream_id.clone();
+
+    tokio::spawn(async move {
+        info!("🎤 [Continuous Voice] Background processing started for stream: {}", stream_id_clone);
+
+        // Simulate continuous processing
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        info!("✅ [Continuous Voice] Stream {} ready for processing", stream_id_clone);
+    });
+
+    Ok(format!("Continuous voice chat started with stream ID: {}", stream_id))
+}

@@ -8,6 +8,7 @@ import EnhancedVoiceModal from './EnhancedVoiceModal';
 import EnhancedPluginPanel from './EnhancedPluginPanel';
 import SystemSettingsPanel from './SystemSettingsPanel';
 import SystemPromptPanel from './SystemPromptPanel';
+import ContextWindowIndicator from './ContextWindowIndicator';
 import { useEnhancedChatStore } from '../stores/enhancedChatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAppStore } from '../stores/chatStore';
@@ -38,6 +39,7 @@ const EnhancedChatInterface: React.FC = () => {
   const [showPluginPanel, setShowPluginPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [showSystemPromptPanel, setShowSystemPromptPanel] = useState(false);
+  const [contextNotification, setContextNotification] = useState<string | null>(null);
   const [networkStatus, setNetworkStatus] = useState(() => {
     if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'onLine' in navigator) {
       return navigator.onLine;
@@ -58,7 +60,16 @@ const EnhancedChatInterface: React.FC = () => {
     isLoading,
     activeChatId,
     initializeStore,
-    isInitialized
+    isInitialized,
+    // Context management
+    tokenCount,
+    maxTokens,
+    isOptimizing,
+    lastOptimization,
+    calculateTokenUsage,
+    pruneOldMessages,
+    clearAllContext,
+    updateTokenCount
   } = useEnhancedChatStore();
 
   const { settings } = useSettingsStore();
@@ -67,6 +78,32 @@ const EnhancedChatInterface: React.FC = () => {
   // Enhanced hooks
   const streaming = useEnhancedStreaming();
   const voice = useEnhancedVoice();
+
+  // Context management handlers
+  const handlePruneContext = useCallback(async () => {
+    setContextNotification('Optimizing memory...');
+    try {
+      await pruneOldMessages();
+      setContextNotification('Memory optimized');
+      setTimeout(() => setContextNotification(null), 3000);
+    } catch (error) {
+      console.error('Failed to prune context:', error);
+      setContextNotification('Optimization failed');
+      setTimeout(() => setContextNotification(null), 3000);
+    }
+  }, [pruneOldMessages]);
+
+  const handleClearContext = useCallback(() => {
+    setContextNotification('Clearing all memory...');
+    clearAllContext();
+    setContextNotification('Memory cleared');
+    setTimeout(() => setContextNotification(null), 3000);
+  }, [clearAllContext]);
+
+  // Update token count when messages change
+  useEffect(() => {
+    updateTokenCount();
+  }, [messages, updateTokenCount]);
 
   // Enhanced tool context integration
   const getToolContext = useCallback(() => {
@@ -366,6 +403,14 @@ const EnhancedChatInterface: React.FC = () => {
 
           // FIXED: Use captured message ID to ensure proper message targeting
           updateAssistantMessage(finalContent || 'No response generated', true, capturedMessageId);
+
+          // FIXED: Trigger TTS if voice output is enabled
+          if (settings.voiceConfig.ttsEnabled && settings.voiceConfig.autoPlayTTS && finalContent && finalContent.trim()) {
+            console.log('🔊 [CHAT] Triggering TTS for completed response');
+            voice.speakText(finalContent, { interrupt: false }).catch(error => {
+              console.error('❌ [CHAT] TTS failed:', error);
+            });
+          }
         },
         onError: (error: string) => {
           console.error('❌ [CHAT] Streaming error for message', capturedMessageId, ':', error);
@@ -453,6 +498,17 @@ const EnhancedChatInterface: React.FC = () => {
                   onRefresh={() => modelHealthChecker.forceCheck()}
                 />
                 <HardwareStatusBadge />
+
+                {/* Context Window Indicator */}
+                <ContextWindowIndicator
+                  tokenCount={tokenCount}
+                  maxTokens={maxTokens}
+                  onPruneRequested={handlePruneContext}
+                  onClearContext={handleClearContext}
+                  isOptimizing={isOptimizing}
+                  lastOptimization={lastOptimization}
+                  className="w-64"
+                />
               </>
             )}
 
@@ -559,6 +615,16 @@ const EnhancedChatInterface: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Context Notification */}
+        {contextNotification && (
+          <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg animate-fade-in">
+            <div className="flex items-center gap-2 text-blue-800 dark:text-blue-200">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+              <span className="text-sm font-medium">{contextNotification}</span>
+            </div>
+          </div>
+        )}
 
         {/* Streaming Status */}
         {streaming.streamingState.isStreaming && (
