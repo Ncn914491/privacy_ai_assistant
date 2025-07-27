@@ -290,6 +290,7 @@ const EnhancedSidebar: React.FC = () => {
   const [showBrowser, setShowBrowser] = useState(false);
   const [extractedContent, setExtractedContent] = useState<any>(null);
   const [showCapabilities, setShowCapabilities] = useState(false);
+  const [showAllChats, setShowAllChats] = useState(false);
   const [currentProvider, setCurrentProvider] = useState<ModelProvider>(() => {
     try {
       return llmRouter.getCurrentProvider();
@@ -604,9 +605,9 @@ const EnhancedSidebar: React.FC = () => {
         )}
       >
         {/* Main Sidebar */}
-        <div className="w-80 h-full bg-white dark:bg-gray-900 shadow-lg flex flex-col border-r border-gray-200 dark:border-gray-700">
-          {/* Header */}
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
+        <div className="w-80 h-full bg-white dark:bg-gray-900 shadow-lg flex flex-col border-r border-gray-200 dark:border-gray-700 overflow-hidden">
+          {/* Header - Fixed Height */}
+          <div className="flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
             <button
               type="button"
               onClick={handleNewChat}
@@ -714,56 +715,69 @@ const EnhancedSidebar: React.FC = () => {
             </div>
           </div>
 
-          {/* Chat List */}
-          <div className="flex-1 overflow-y-auto p-2 min-h-0">
-            {filteredChats.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                <MessageSquare size={48} className="mx-auto mb-4 opacity-50" />
-                <p className="text-sm">
-                  {searchQuery ? 'No chats found' : 'No chats yet'}
-                </p>
-                <p className="text-xs mt-1">
-                  {searchQuery ? 'Try a different search term' : 'Create your first chat to get started'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredChats.map((session) => (
-                  <ChatItem
-                    key={session.id}
-                    session={session}
-                    isActive={session.id === activeChatId}
-                    onSelect={handleSelectChat}
-                    onRename={handleRenameChat}
-                    onDelete={handleDeleteChat}
-                    onDuplicate={handleDuplicateChat}
-                    onExport={handleExportChat}
-                    onArchive={handleArchiveChat}
-                  />
-                ))}
-              </div>
-            )}
+          {/* Chat List - Exactly 25% of Available Space */}
+          <div className="flex flex-col border-b border-gray-200 dark:border-gray-700 chat-history-section">
+            {/* Chat List Header */}
+            <div className="flex-shrink-0 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Recent Chats</h3>
+            </div>
+
+            {/* Scrollable Chat List */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden sidebar-scrollable">
+              {filteredChats.length === 0 ? (
+                <div className="text-center py-8 px-4 text-gray-500 dark:text-gray-400">
+                  <MessageSquare size={48} className="mx-auto mb-4 opacity-50" />
+                  <p className="text-sm">
+                    {searchQuery ? 'No chats found' : 'No chats yet'}
+                  </p>
+                  <p className="text-xs mt-1">
+                    {searchQuery ? 'Try a different search term' : 'Create your first chat to get started'}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2 space-y-2">
+                  {filteredChats.map((session) => (
+                    <ChatItem
+                      key={session.id}
+                      session={session}
+                      isActive={session.id === activeChatId}
+                      onSelect={handleSelectChat}
+                      onRename={handleRenameChat}
+                      onDelete={handleDeleteChat}
+                      onDuplicate={handleDuplicateChat}
+                      onExport={handleExportChat}
+                      onArchive={handleArchiveChat}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Model Selector */}
-          <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-            <ModelSelector
-              onProviderChange={(provider) => {
-                console.log('🤖 [Sidebar] Model provider changed:', provider);
-              }}
-            />
-          </div>
+          {/* Remaining Content Area - 75% of Available Space */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Model Selector - Prominent Position */}
+            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-3">
+              <ModelSelector
+                onProviderChange={(provider) => {
+                  console.log('🤖 [Sidebar] Model provider changed:', provider);
+                }}
+              />
+            </div>
 
-          {/* Capabilities Status Panel */}
-          <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-            <CapabilitiesStatusPanel
-              isCollapsed={!showCapabilities}
-              onToggle={() => setShowCapabilities(!showCapabilities)}
-            />
-          </div>
+            {/* Capabilities Status Panel - Compact */}
+            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 p-2">
+              <CapabilitiesStatusPanel
+                isCollapsed={!showCapabilities}
+                onToggle={() => setShowCapabilities(!showCapabilities)}
+              />
+            </div>
 
-          {/* Footer */}
-          <div className="border-t border-gray-200 dark:border-gray-700">
+            {/* Spacer to push footer to bottom */}
+            <div className="flex-1"></div>
+
+            {/* Footer */}
+            <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700">
             <button
               type="button"
               onClick={handleBrowserToggle}
@@ -788,6 +802,7 @@ const EnhancedSidebar: React.FC = () => {
                 <span>v0.2.0</span>
               </div>
             </div>
+          </div>
           </div>
         </div>
 

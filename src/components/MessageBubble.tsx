@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Copy, Check, User, Bot } from 'lucide-react';
+import { Copy, Check, User, Bot, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import { Message } from '../types';
 import { cn } from '../utils/cn';
+import { useEnhancedVoice } from '../hooks/useEnhancedVoice';
 
 interface MessageBubbleProps {
   message: Message;
@@ -18,6 +19,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   streamingText = ''
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isTTSPlaying, setIsTTSPlaying] = useState(false);
+  const voice = useEnhancedVoice();
 
   const handleCopy = async () => {
     try {
@@ -27,6 +30,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
       console.error('Failed to copy message:', error);
+    }
+  };
+
+  const handleTTS = async () => {
+    if (isTTSPlaying) {
+      // Stop current TTS
+      voice.stopSpeaking();
+      setIsTTSPlaying(false);
+    } else {
+      // Start TTS
+      try {
+        setIsTTSPlaying(true);
+        await voice.speakText(message.content, { interrupt: true });
+        setIsTTSPlaying(false);
+      } catch (error) {
+        console.error('TTS failed:', error);
+        setIsTTSPlaying(false);
+      }
     }
   };
 
@@ -173,23 +194,47 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
-          {/* Copy Button */}
+          {/* Action Buttons */}
           {!message.isLoading && !message.error && (
-            <button
-              onClick={handleCopy}
-              className={cn(
-                'absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200',
-                'hover:bg-black/10 dark:hover:bg-white/10',
-                'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500'
+            <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              {/* TTS Button - Only for assistant messages */}
+              {isAssistant && message.content && message.content.trim() && (
+                <button
+                  type="button"
+                  onClick={handleTTS}
+                  className={cn(
+                    'p-1 rounded hover:bg-black/10 dark:hover:bg-white/10',
+                    'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500',
+                    isTTSPlaying && 'bg-blue-100 dark:bg-blue-900/30'
+                  )}
+                  aria-label={isTTSPlaying ? "Stop reading message" : "Read message aloud"}
+                  disabled={isStreaming}
+                >
+                  {isTTSPlaying ? (
+                    <VolumeX size={14} className="text-blue-600" />
+                  ) : (
+                    <Volume2 size={14} className="text-gray-500 dark:text-gray-400 hover:text-blue-600" />
+                  )}
+                </button>
               )}
-              aria-label="Copy message"
-            >
-              {copied ? (
-                <Check size={14} className="text-green-500" />
-              ) : (
-                <Copy size={14} className="text-gray-500 dark:text-gray-400" />
-              )}
-            </button>
+
+              {/* Copy Button */}
+              <button
+                type="button"
+                onClick={handleCopy}
+                className={cn(
+                  'p-1 rounded hover:bg-black/10 dark:hover:bg-white/10',
+                  'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500'
+                )}
+                aria-label="Copy message"
+              >
+                {copied ? (
+                  <Check size={14} className="text-green-500" />
+                ) : (
+                  <Copy size={14} className="text-gray-500 dark:text-gray-400" />
+                )}
+              </button>
+            </div>
           )}
         </div>
 

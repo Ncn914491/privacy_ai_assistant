@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic, Wifi, WifiOff, ChevronDown } from 'lucide-react';
+import { Send, Mic, Wifi, WifiOff, ChevronDown, MessageCircle } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { useAppStore } from '../stores/chatStore';
 import { llmRouter } from '../core/agents/llmRouter';
@@ -9,6 +9,8 @@ import VoiceChat from './VoiceChat';
 interface InputAreaProps {
   onSendMessage: (message: string) => void;
   onVoiceRecord?: () => void; // Made optional - voice functionality temporarily disabled
+  onRealtimeVoiceToggle?: () => void; // New prop for realtime voice conversation
+  onVoiceInput?: (text: string) => void; // New prop for voice-to-text input
   disabled?: boolean;
   isLoading?: boolean;
   placeholder?: string;
@@ -17,12 +19,15 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({
   onSendMessage,
   onVoiceRecord,
+  onRealtimeVoiceToggle,
+  onVoiceInput,
   disabled = false,
   isLoading = false,
   placeholder = "Type your message..."
 }) => {
   const [currentInput, setCurrentInput] = useState('');
   const [showVoiceChat, setShowVoiceChat] = useState(false);
+  const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Feature flags for voice functionality
@@ -75,6 +80,64 @@ const InputArea: React.FC<InputAreaProps> = ({
     } else {
       // AI response - this will be handled by the main chat interface
       console.log('🤖 [Voice] AI response:', transcript);
+    }
+  };
+
+  const handleVoiceInputToggle = () => {
+    if (isVoiceInputActive) {
+      // Stop voice input
+      setIsVoiceInputActive(false);
+    } else {
+      // Start voice input
+      setIsVoiceInputActive(true);
+
+      // Use Web Speech API for voice input
+      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+        const recognition = new SpeechRecognition();
+
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          console.log('🎤 Voice input started');
+          setIsVoiceInputActive(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          console.log('🎤 Voice input result:', transcript);
+          setCurrentInput(transcript);
+
+          // If onVoiceInput callback is provided, call it
+          if (onVoiceInput) {
+            onVoiceInput(transcript);
+          }
+
+          // Auto-send the message
+          setTimeout(() => {
+            onSendMessage(transcript);
+            setCurrentInput('');
+          }, 500);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('🎤 Voice input error:', event.error);
+          setIsVoiceInputActive(false);
+        };
+
+        recognition.onend = () => {
+          console.log('🎤 Voice input ended');
+          setIsVoiceInputActive(false);
+        };
+
+        recognition.start();
+      } else {
+        console.error('Speech recognition not supported');
+        alert('Speech recognition is not supported in this browser');
+        setIsVoiceInputActive(false);
+      }
     }
   };
 
@@ -217,7 +280,40 @@ const InputArea: React.FC<InputAreaProps> = ({
             <Mic className="w-5 h-5" />
           </button>
         )}
-        
+
+        {/* REALTIME VOICE CONVERSATION BUTTON */}
+        {isVoiceEnabled && onRealtimeVoiceToggle && (
+          <button
+            type="button"
+            onClick={onRealtimeVoiceToggle}
+            disabled={disabled}
+            className={cn(
+              "p-2 rounded-lg transition-colors bg-purple-600 text-white hover:bg-purple-700",
+              disabled && "opacity-50 cursor-not-allowed"
+            )}
+            title="Start realtime voice conversation"
+          >
+            <MessageCircle className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* Voice Input Button */}
+        <button
+          type="button"
+          onClick={handleVoiceInputToggle}
+          disabled={disabled}
+          className={cn(
+            "p-2 rounded-lg transition-colors",
+            isVoiceInputActive
+              ? "bg-red-600 text-white hover:bg-red-700 animate-pulse"
+              : "bg-green-600 text-white hover:bg-green-700",
+            disabled && "opacity-50 cursor-not-allowed"
+          )}
+          title={isVoiceInputActive ? "Stop voice input" : "Start voice input (click and speak)"}
+        >
+          <Mic className={cn("w-5 h-5", isVoiceInputActive && "animate-pulse")} />
+        </button>
+
         <button
           type="button"
           onClick={handleSendMessage}

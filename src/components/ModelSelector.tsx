@@ -129,7 +129,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   ];
 
   return (
-    <div className={cn('bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4', className)}>
+    <div className={cn('bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative z-10', className)}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">

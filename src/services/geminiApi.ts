@@ -1,8 +1,13 @@
 import { GoogleGenerativeAI, GenerativeModel, GenerateContentStreamResult } from '@google/generative-ai';
 
 // Google Gemini API configuration
-const GEMINI_API_KEY = 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM';
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM';
 const DEFAULT_MODEL = 'gemini-1.5-flash';
+
+// Validate API key format
+const isValidApiKey = (key: string): boolean => {
+  return key && key.startsWith('AIza') && key.length > 30;
+};
 
 export interface GeminiStreamOptions {
   streamId: string;
@@ -30,6 +35,10 @@ export class GeminiApiService {
   private activeStreams: Map<string, AbortController> = new Map();
 
   constructor(apiKey: string = GEMINI_API_KEY, modelName: string = DEFAULT_MODEL) {
+    if (!isValidApiKey(apiKey)) {
+      console.warn('⚠️ [Gemini API] Invalid or missing API key. Online mode will not work.');
+    }
+
     this.genAI = new GoogleGenerativeAI(apiKey);
     this.model = this.genAI.getGenerativeModel({ model: modelName });
   }
@@ -227,29 +236,54 @@ export class GeminiApiService {
     error?: string;
   }> {
     const startTime = Date.now();
-    
+
     try {
       console.log('🌐 [Gemini API] Testing connectivity...');
-      
-      // Simple test prompt
-      const result = await this.model.generateContent('Hello');
+
+      // Check API key validity first
+      if (!isValidApiKey(GEMINI_API_KEY)) {
+        throw new Error('Invalid or missing Gemini API key. Please check your configuration.');
+      }
+
+      // Simple test prompt with timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Request timeout')), 10000);
+      });
+
+      const testPromise = this.model.generateContent('Test connectivity');
+      const result = await Promise.race([testPromise, timeoutPromise]);
+
       const latency = Date.now() - startTime;
-      
+
       console.log(`✅ [Gemini API] Connectivity test passed (${latency}ms)`);
-      
+
       return {
         success: true,
         latency
       };
-      
+
     } catch (error) {
       const latency = Date.now() - startTime;
-      console.error('❌ [Gemini API] Connectivity test failed:', error);
-      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      console.error('❌ [Gemini API] Connectivity test failed:', errorMessage);
+
+      // Provide more specific error messages
+      let userFriendlyError = errorMessage;
+      if (errorMessage.includes('API_KEY_INVALID')) {
+        userFriendlyError = 'Invalid Gemini API key. Please check your configuration.';
+      } else if (errorMessage.includes('timeout')) {
+        userFriendlyError = 'Connection timeout. Please check your internet connection.';
+      } else if (errorMessage.includes('PERMISSION_DENIED')) {
+        userFriendlyError = 'API access denied. Please verify your API key permissions.';
+      } else if (errorMessage.includes('QUOTA_EXCEEDED')) {
+        userFriendlyError = 'API quota exceeded. Please check your usage limits.';
+      }
+
       return {
         success: false,
         latency,
-        error: error instanceof Error ? error.message : String(error)
+        error: userFriendlyError
       };
     }
   }

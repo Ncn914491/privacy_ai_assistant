@@ -1136,3 +1136,78 @@ body {
   animation: bounce 1s infinite;
   animation-delay: 300ms;
 }
+
+/* Enhanced sidebar scrolling */
+.sidebar-scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.sidebar-scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5);
+  border-radius: 3px;
+}
+
+.sidebar-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.7);
+}
+
+/* Dark mode scrollbar */
+.dark .sidebar-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(75, 85, 99, 0.5);
+}
+
+.dark .sidebar-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(75, 85, 99, 0.7);
+}
+
+/* Browser iframe container */
+.browser-iframe-container {
+  min-height: 400px;
+}
+
+/* Chat history section - exactly 25% of sidebar space */
+.chat-history-section {
+  height: 25%;
+  min-height: 200px;
+}
+
+/* Enhanced UI consistency */
+.sidebar-section {
+  transition: all 0.2s ease-in-out;
+}
+
+.sidebar-button {
+  transition: all 0.15s ease-in-out;
+  border-radius: 0.5rem;
+}
+
+.sidebar-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.dark .sidebar-button:hover {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Improved spacing for interactive elements */
+.interactive-element {
+  padding: 0.75rem;
+  margin: 0.25rem 0;
+}
+
+/* Enhanced focus states */
+.focus-enhanced:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}

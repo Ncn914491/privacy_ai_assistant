@@ -50,7 +50,12 @@ export class LLMRouter {
 
   private readonly LOCAL_MODEL = 'gemma3n:latest';
   private readonly ONLINE_MODEL = 'gemini-1.5-flash';
-  private readonly GEMINI_API_KEY = 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM';
+  private readonly GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM';
+
+  // Validate API key format
+  private isValidApiKey(key: string): boolean {
+    return key && key.startsWith('AIza') && key.length > 30;
+  }
 
   constructor(config?: Partial<LLMRouterConfig>) {
     this.config = {
@@ -409,6 +414,18 @@ export class LLMRouter {
       const isOnline = navigator.onLine;
 
       if (isOnline) {
+        // Check API key validity first
+        if (!this.isValidApiKey(this.GEMINI_API_KEY)) {
+          console.warn('⚠️ [LLM Router] Invalid Gemini API key detected');
+          this.connectivityStatus = {
+            isOnline: true,
+            latency: Date.now() - startTime,
+            lastCheck: new Date(),
+            geminiApiReachable: false
+          };
+          return;
+        }
+
         // Test Gemini API reachability with a simple request
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
           method: 'GET',
@@ -427,7 +444,11 @@ export class LLMRouter {
           geminiApiReachable: response.ok
         };
 
-        console.log('🌐 [LLM Router] Connectivity check:', this.connectivityStatus);
+        if (!response.ok) {
+          console.warn(`⚠️ [LLM Router] Gemini API not reachable: ${response.status} ${response.statusText}`);
+        } else {
+          console.log('🌐 [LLM Router] Connectivity check:', this.connectivityStatus);
+        }
       } else {
         this.connectivityStatus = {
           isOnline: false,

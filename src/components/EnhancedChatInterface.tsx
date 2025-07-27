@@ -6,6 +6,7 @@ import HardwareStatusBadge from './HardwareStatusBadge';
 import ThinkingIndicator from './ThinkingIndicator';
 import EnhancedVoiceModal from './EnhancedVoiceModal';
 import EnhancedPluginPanel from './EnhancedPluginPanel';
+import RealtimeVoiceConversation from './RealtimeVoiceConversation';
 import SystemSettingsPanel from './SystemSettingsPanel';
 import SystemPromptPanel from './SystemPromptPanel';
 import ContextWindowIndicator from './ContextWindowIndicator';
@@ -39,6 +40,12 @@ const EnhancedChatInterface: React.FC = () => {
   const [showPluginPanel, setShowPluginPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [showSystemPromptPanel, setShowSystemPromptPanel] = useState(false);
+  const [showRealtimeVoice, setShowRealtimeVoice] = useState(false);
+  const [globalTTSEnabled, setGlobalTTSEnabled] = useState(() => {
+    // Load from localStorage
+    const saved = localStorage.getItem('globalTTSEnabled');
+    return saved ? JSON.parse(saved) : false;
+  });
   const [contextNotification, setContextNotification] = useState<string | null>(null);
   const [networkStatus, setNetworkStatus] = useState(() => {
     if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'onLine' in navigator) {
@@ -404,9 +411,10 @@ const EnhancedChatInterface: React.FC = () => {
           // FIXED: Use captured message ID to ensure proper message targeting
           updateAssistantMessage(finalContent || 'No response generated', true, capturedMessageId);
 
-          // FIXED: Trigger TTS if voice output is enabled
-          if (settings.voiceConfig.ttsEnabled && settings.voiceConfig.autoPlayTTS && finalContent && finalContent.trim()) {
-            console.log('🔊 [CHAT] Triggering TTS for completed response');
+          // FIXED: Trigger TTS if voice output is enabled OR global TTS is enabled
+          const shouldSpeak = (settings.voiceConfig.ttsEnabled && settings.voiceConfig.autoPlayTTS) || globalTTSEnabled;
+          if (shouldSpeak && finalContent && finalContent.trim()) {
+            console.log('🔊 [CHAT] Triggering TTS for completed response (Global TTS:', globalTTSEnabled, ')');
             voice.speakText(finalContent, { interrupt: false }).catch(error => {
               console.error('❌ [CHAT] TTS failed:', error);
             });
@@ -456,16 +464,56 @@ const EnhancedChatInterface: React.FC = () => {
     }
   };
 
-  const handleStreamingControl = () => {
+  const handleGlobalTTSToggle = () => {
+    const newState = !globalTTSEnabled;
+    setGlobalTTSEnabled(newState);
+    localStorage.setItem('globalTTSEnabled', JSON.stringify(newState));
+    console.log('🔊 Global TTS toggled:', newState ? 'enabled' : 'disabled');
+  };
+
+  // Effect to persist global TTS setting
+  useEffect(() => {
+    localStorage.setItem('globalTTSEnabled', JSON.stringify(globalTTSEnabled));
+  }, [globalTTSEnabled]);
+
+  const handleStreamingControl = async () => {
     if (streaming.streamingState.isStreaming) {
-      streaming.stopStream();
+      console.log('⏹️ [CHAT] Stopping stream and cleaning up states...');
+
+      try {
+        // Stop the stream
+        await streaming.stopStream();
+
+        // Force clear all loading states
+        setLoading(false);
+        setCurrentAssistantMessageId(null);
+        currentAssistantMessageIdRef.current = null;
+
+        // If there's a current assistant message, mark it as complete
+        if (currentAssistantMessageIdRef.current) {
+          updateMessage(currentAssistantMessageIdRef.current, {
+            metadata: {
+              isStreaming: false,
+              lastUpdated: new Date()
+            }
+          });
+        }
+
+        console.log('✅ [CHAT] Stream stopped and states cleaned up');
+      } catch (error) {
+        console.error('❌ [CHAT] Error stopping stream:', error);
+        // Force clear states even if stop fails
+        setLoading(false);
+        setCurrentAssistantMessageId(null);
+        currentAssistantMessageIdRef.current = null;
+      }
     }
   };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900" data-chat-container>
       {/* Enhanced Header */}
-      <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
+      <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
@@ -531,9 +579,9 @@ const EnhancedChatInterface: React.FC = () => {
                 type="button"
                 onClick={handleVoiceRecord}
                 className={cn(
-                  "p-2 rounded-lg transition-colors",
+                  "p-2 rounded-lg transition-all duration-200 sidebar-button",
                   voice.voiceState.isRecording
-                    ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                    ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 shadow-md"
                     : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
                 )}
                 title="Voice Input"
@@ -561,6 +609,25 @@ const EnhancedChatInterface: React.FC = () => {
                 )}
               </button>
             )}
+
+            {/* Global TTS Toggle */}
+            <button
+              type="button"
+              onClick={handleGlobalTTSToggle}
+              className={cn(
+                "p-2 rounded-lg transition-all duration-200 border-2 sidebar-button focus-enhanced",
+                globalTTSEnabled
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 shadow-md"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-600"
+              )}
+              title={globalTTSEnabled ? "Global TTS: ON - All AI responses will be read aloud" : "Global TTS: OFF - Click to enable automatic speech for all AI responses"}
+            >
+              {globalTTSEnabled ? (
+                <Volume2 className="w-4 h-4" />
+              ) : (
+                <VolumeX className="w-4 h-4" />
+              )}
+            </button>
 
             {/* Streaming Controls */}
             {streaming.streamingState.isStreaming && (
@@ -690,13 +757,31 @@ const EnhancedChatInterface: React.FC = () => {
           })
         )}
         
-        {/* Enhanced Thinking Indicator - Only show when loading, not streaming */}
-        {isLoading && !streaming.streamingState.isStreaming && (
-          <ThinkingIndicator
-            isVisible={true}
-            isStreaming={false}
-            streamingText=""
-          />
+        {/* Enhanced Thinking Indicator - Show for both loading and streaming */}
+        {(isLoading || streaming.streamingState.isStreaming) && (
+          <div className="relative">
+            <ThinkingIndicator
+              isVisible={true}
+              isStreaming={streaming.streamingState.isStreaming}
+              streamingText={streaming.streamingState.streamedContent}
+            />
+
+            {/* Stop Button for Streaming */}
+            {streaming.streamingState.isStreaming && (
+              <div className="absolute top-2 right-2">
+                <button
+                  type="button"
+                  onClick={handleStreamingControl}
+                  className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-lg"
+                  title="Stop AI response generation"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <rect x="6" y="6" width="8" height="8" rx="1" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -704,6 +789,11 @@ const EnhancedChatInterface: React.FC = () => {
       <InputArea
         onSendMessage={handleSendMessage}
         onVoiceRecord={settings.voiceConfig.sttEnabled ? handleVoiceRecord : undefined}
+        onRealtimeVoiceToggle={() => setShowRealtimeVoice(true)}
+        onVoiceInput={(text: string) => {
+          console.log('🎤 Voice input received:', text);
+          // The voice input handler already sends the message, so we don't need to do anything here
+        }}
         disabled={false}
         isLoading={isLoading || streaming.streamingState.isStreaming}
         placeholder={!isInitialized ? "Initializing..." : "Type your message..."}
@@ -734,6 +824,12 @@ const EnhancedChatInterface: React.FC = () => {
       <SystemPromptPanel
         isOpen={showSystemPromptPanel}
         onClose={() => setShowSystemPromptPanel(false)}
+      />
+
+      {/* Realtime Voice Conversation */}
+      <RealtimeVoiceConversation
+        isOpen={showRealtimeVoice}
+        onClose={() => setShowRealtimeVoice(false)}
       />
     </div>
   );
