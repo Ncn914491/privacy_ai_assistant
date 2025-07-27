@@ -288,6 +288,11 @@ const EnhancedSidebar: React.FC = () => {
     createNewChatWithTitle,
     searchChats,
     getRecentChats,
+    switchToChat,
+    renameChat,
+    deleteChat,
+    archiveChat,
+    exportAllChats,
     isLoading
   } = useEnhancedChatStore();
 
@@ -377,6 +382,76 @@ const EnhancedSidebar: React.FC = () => {
   const handleToolClick = (toolId: string) => {
     setSelectedTool(toolId);
     setShowPluginSidebar(false); // Close plugin sidebar when opening tool dashboard
+  };
+
+  // Chat session handlers
+  const handleSelectChat = async (chatId: string) => {
+    try {
+      await switchToChat(chatId);
+      console.log('Switched to chat:', chatId);
+    } catch (error) {
+      console.error('Failed to switch to chat:', error);
+    }
+  };
+
+  const handleRenameChat = async (chatId: string, newTitle: string) => {
+    try {
+      await renameChat(chatId, newTitle);
+      console.log('Renamed chat:', chatId, 'to:', newTitle);
+    } catch (error) {
+      console.error('Failed to rename chat:', error);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string) => {
+    try {
+      await deleteChat(chatId);
+      console.log('Deleted chat:', chatId);
+    } catch (error) {
+      console.error('Failed to delete chat:', error);
+    }
+  };
+
+  const handleDuplicateChat = async (chatId: string) => {
+    try {
+      const session = chatSessions[chatId];
+      if (session) {
+        const newChatId = await createNewChatWithTitle(`${session.title} (Copy)`);
+        console.log('Duplicated chat:', chatId, 'as:', newChatId);
+      }
+    } catch (error) {
+      console.error('Failed to duplicate chat:', error);
+    }
+  };
+
+  const handleExportChat = async (chatId: string) => {
+    try {
+      const session = chatSessions[chatId];
+      if (session) {
+        const exportData = JSON.stringify(session, null, 2);
+        const blob = new Blob([exportData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-${session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('Exported chat:', chatId);
+      }
+    } catch (error) {
+      console.error('Failed to export chat:', error);
+    }
+  };
+
+  const handleArchiveChat = async (chatId: string) => {
+    try {
+      await archiveChat(chatId);
+      console.log('Archived chat:', chatId);
+    } catch (error) {
+      console.error('Failed to archive chat:', error);
+    }
   };
 
   const handleToolExecute = async (data: any) => {
@@ -472,12 +547,12 @@ const EnhancedSidebar: React.FC = () => {
                     key={session.id}
                     session={session}
                     isActive={session.id === activeChatId}
-                    onSelect={() => {/* Implementation needed */}}
-                    onRename={() => {/* Implementation needed */}}
-                    onDelete={() => {/* Implementation needed */}}
-                    onDuplicate={() => {/* Implementation needed */}}
-                    onExport={() => {/* Implementation needed */}}
-                    onArchive={() => {/* Implementation needed */}}
+                    onSelect={handleSelectChat}
+                    onRename={handleRenameChat}
+                    onDelete={handleDeleteChat}
+                    onDuplicate={handleDuplicateChat}
+                    onExport={handleExportChat}
+                    onArchive={handleArchiveChat}
                   />
                 ))}
               </div>

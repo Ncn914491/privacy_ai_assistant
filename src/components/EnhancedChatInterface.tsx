@@ -52,6 +52,7 @@ const EnhancedChatInterface: React.FC = () => {
     messages,
     chatSessions,
     addMessageWithMetadata,
+    addMessageDirect,
     updateMessage,
     setLoading,
     isLoading,
@@ -67,16 +68,60 @@ const EnhancedChatInterface: React.FC = () => {
   const streaming = useEnhancedStreaming();
   const voice = useEnhancedVoice();
 
-  // Tool context integration
+  // Enhanced tool context integration
   const getToolContext = useCallback(() => {
     try {
       const toolContext = JSON.parse(localStorage.getItem('toolContext') || '{}');
       console.log('🛠️ [CHAT] Retrieved tool context:', toolContext);
-      return toolContext;
+
+      // Format tool context for better LLM understanding
+      if (Object.keys(toolContext).length > 0) {
+        return {
+          ...toolContext,
+          formattedContext: formatToolContextForLLM(toolContext)
+        };
+      }
+
+      return {};
     } catch (error) {
       console.error('❌ [CHAT] Failed to retrieve tool context:', error);
       return {};
     }
+  }, []);
+
+  // Format tool context for LLM consumption
+  const formatToolContextForLLM = useCallback((context: any): string => {
+    if (!context || Object.keys(context).length === 0) {
+      return '';
+    }
+
+    let formatted = '\n\n--- TOOL CONTEXT ---\n';
+
+    if (context.toolName) {
+      formatted += `Tool: ${context.toolName}\n`;
+    }
+
+    if (context.timestamp) {
+      formatted += `Last Updated: ${new Date(context.timestamp).toLocaleString()}\n`;
+    }
+
+    if (context.data && Array.isArray(context.data)) {
+      formatted += `\nTool Data (${context.data.length} items):\n`;
+      context.data.forEach((item: any, index: number) => {
+        formatted += `${index + 1}. ${item.title || 'Untitled'}\n`;
+        if (item.content) {
+          formatted += `   ${item.content.substring(0, 100)}${item.content.length > 100 ? '...' : ''}\n`;
+        }
+      });
+    }
+
+    if (context.context) {
+      formatted += `\nAdditional Context:\n${context.context}\n`;
+    }
+
+    formatted += '--- END TOOL CONTEXT ---\n\n';
+
+    return formatted;
   }, []);
 
   // Initialize stores and plugins
@@ -156,18 +201,28 @@ const EnhancedChatInterface: React.FC = () => {
 
   // State to track the current assistant message being streamed
   const [currentAssistantMessageId, setCurrentAssistantMessageId] = useState<string | null>(null);
+  const currentAssistantMessageIdRef = useRef<string | null>(null); // FIXED: Use ref for immediate access
 
   // Helper function to update the assistant message during streaming
-  const updateAssistantMessage = useCallback((content: string, isComplete: boolean) => {
-    if (!currentAssistantMessageId) {
+  const updateAssistantMessage = useCallback((content: string, isComplete: boolean, messageId?: string) => {
+    // FIXED: Use provided messageId or fall back to ref, not state
+    const targetMessageId = messageId || currentAssistantMessageIdRef.current;
+    
+    if (!targetMessageId) {
       console.warn('❌ [CHAT] No current assistant message ID to update');
       return;
     }
 
-    console.log(`🔄 [CHAT] Updating assistant message ${currentAssistantMessageId} with ${content.length} chars`);
+    // FIXED: Ensure content is not empty
+    if (!content || !content.trim()) {
+      console.warn('⚠️ [CHAT] Empty content received, skipping update');
+      return;
+    }
+
+    console.log(`🔄 [CHAT] Updating assistant message ${targetMessageId} with ${content.length} chars, complete: ${isComplete}`);
     
     // Update the message using the store's updateMessage function
-    updateMessage(currentAssistantMessageId, {
+    updateMessage(targetMessageId, {
       content: content,
       metadata: {
         isStreaming: !isComplete,
@@ -177,10 +232,11 @@ const EnhancedChatInterface: React.FC = () => {
 
     // Clear the tracking ID when streaming is complete
     if (isComplete) {
-      console.log(`✅ [CHAT] Completed streaming for message ${currentAssistantMessageId}`);
+      console.log(`✅ [CHAT] Completed streaming for message ${targetMessageId}`);
       setCurrentAssistantMessageId(null);
+      currentAssistantMessageIdRef.current = null;
     }
-  }, [currentAssistantMessageId, updateMessage]);
+  }, [updateMessage]);
 
   const handleSendMessage = async (message: string, options?: { mode?: 'online' | 'offline'; model?: string }) => {
     // FIXED: Check for streaming state to prevent concurrent requests
@@ -193,12 +249,20 @@ const EnhancedChatInterface: React.FC = () => {
       return;
     }
 
+    // FIXED: Clear any existing assistant message tracking
+    if (currentAssistantMessageIdRef.current) {
+      console.log('🧹 [CHAT] Clearing previous assistant message tracking');
+      setCurrentAssistantMessageId(null);
+      currentAssistantMessageIdRef.current = null;
+    }
+
     try {
       setLoading(true);
 
-      // Add user message with metadata
+      // FIXED: Add user message with metadata and ensure proper ordering
+      const userMessageId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       addMessageWithMetadata(message, 'user', {
-        model: options?.model,
+        model: options?.model || 'gemma3n:latest',
         provider: options?.mode === 'online' ? 'online' : 'local'
       });
 
@@ -236,61 +300,77 @@ const EnhancedChatInterface: React.FC = () => {
         }
       }
 
-      // Create a placeholder assistant message for streaming
+      // FIXED: Create a placeholder assistant message for streaming with proper isolation
       console.log(`🏷️ [CHAT] Creating placeholder assistant message for streaming`);
+
+      // FIXED: Generate a unique ID for the assistant message with better isolation
+      const assistantMessageId = `assistant_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      // Add the placeholder message immediately and get its ID for tracking
-      const currentMessages = messages;
-      addMessageWithMetadata('', 'assistant', {
-        model: options?.model,
-        provider: options?.mode === 'online' ? 'online' : 'local'
-      });
-      
-      // Get the ID of the newly created assistant message
-      // We'll track this after the message is added to the store
-      setTimeout(() => {
-        const updatedMessages = useEnhancedChatStore.getState().messages;
-        const lastMessage = updatedMessages[updatedMessages.length - 1];
-        if (lastMessage && lastMessage.role === 'assistant') {
-          setCurrentAssistantMessageId(lastMessage.id);
-          console.log(`🏷️ [CHAT] Tracking assistant message ID: ${lastMessage.id}`);
+      // FIXED: Set both state and ref immediately for proper tracking
+      setCurrentAssistantMessageId(assistantMessageId);
+      currentAssistantMessageIdRef.current = assistantMessageId;
+
+      console.log(`🏷️ [CHAT] Created assistant message with ID: ${assistantMessageId}`);
+
+      // FIXED: Add the placeholder message with the specific ID and initial content
+      const assistantMessage = {
+        id: assistantMessageId,
+        content: 'Thinking...', // FIXED: Add initial content to prevent empty box
+        role: 'assistant' as const,
+        timestamp: new Date(),
+        metadata: {
+          model: options?.model || 'gemma3n:latest',
+          provider: options?.mode === 'online' ? 'online' : 'local',
+          isStreaming: true,
+          isPlaceholder: true // FIXED: Mark as placeholder for proper handling
         }
-      }, 100);
+      };
+
+      // FIXED: Add message directly to store using the new function
+      addMessageDirect(assistantMessage);
+
+      // FIXED: Wait a moment for the message to be added to the store
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // REWRITTEN: Start streaming with enhanced error handling and logging
       console.log('🚀 [CHAT] Starting LLM streaming...');
       console.log('🔧 [CHAT] Stream options:', {
-        mode: options?.mode,
-        model: options?.model,
+        mode: options?.mode || 'offline',
+        model: options?.model || 'gemma3n:latest',
         systemPrompt: settings.systemInstructions.systemPrompt ? 'present' : 'none'
       });
 
       // Get tool context for LLM integration
       const toolContext = getToolContext();
 
+      // FIXED: Capture the message ID in closure to ensure proper isolation
+      const capturedMessageId = assistantMessageId;
+
       await streaming.startStream(message, {
-        mode: options?.mode,
-        model: options?.model,
+        mode: options?.mode || 'offline',
+        model: options?.model || 'gemma3n:latest',
         systemPrompt: settings.systemInstructions.systemPrompt,
         toolContext: toolContext,
         onChunk: (accumulatedContent: string, metadata?: any) => {
-          console.log(`📝 [CHAT] Chunk received - Content length: ${accumulatedContent.length} chars`);
+          console.log(`📝 [CHAT] Chunk received for message ${capturedMessageId} - Content length: ${accumulatedContent.length} chars`);
           console.log(`📊 [CHAT] Metadata:`, metadata);
 
-          // FIXED: Update message with real-time accumulated content
-          updateAssistantMessage(accumulatedContent, false);
+          // FIXED: Use captured message ID to ensure proper message targeting
+          if (accumulatedContent && accumulatedContent.trim()) {
+            updateAssistantMessage(accumulatedContent, false, capturedMessageId);
+          }
         },
         onComplete: (finalContent: string, metadata?: any) => {
-          console.log(`✅ [CHAT] Streaming completed - Final length: ${finalContent.length} chars`);
+          console.log(`✅ [CHAT] Streaming completed for message ${capturedMessageId} - Final length: ${finalContent.length} chars`);
           console.log(`📊 [CHAT] Final metadata:`, metadata);
 
-          // FIXED: Finalize message with complete content
-          updateAssistantMessage(finalContent, true);
+          // FIXED: Use captured message ID to ensure proper message targeting
+          updateAssistantMessage(finalContent || 'No response generated', true, capturedMessageId);
         },
         onError: (error: string) => {
-          console.error('❌ [CHAT] Streaming error:', error);
+          console.error('❌ [CHAT] Streaming error for message', capturedMessageId, ':', error);
 
-          // FIXED: Show detailed error message
+          // FIXED: Show detailed error message with captured message ID
           const errorMessage = `❌ **Streaming Error**: ${error}\n\n` +
                               `**Troubleshooting:**\n` +
                               `• Check your internet connection for online models\n` +
@@ -298,26 +378,18 @@ const EnhancedChatInterface: React.FC = () => {
                               `• Try switching between online/offline modes\n\n` +
                               `Please try again or contact support if the issue persists.`;
 
-          updateAssistantMessage(errorMessage, true);
+          updateAssistantMessage(errorMessage, true, capturedMessageId);
         }
       });
 
       console.log('🏁 [CHAT] Streaming request initiated successfully');
 
     } catch (error) {
-      console.error('❌ [CHAT] Critical error in handleSendMessage:', error);
-      const errorStr = error instanceof Error ? error.message : String(error);
-
-      // Add error message to chat
-      addMessageWithMetadata(
-        `❌ **System Error**: ${errorStr}\n\n` +
-        `**Troubleshooting:**\n` +
-        `• Check your internet connection\n` +
-        `• Verify Ollama is running for local models\n` +
-        `• Try refreshing the application\n\n` +
-        `Please try again or contact support if the issue persists.`,
-        'assistant'
-      );
+      console.error('❌ [CHAT] Error in handleSendMessage:', error);
+      
+      // FIXED: Show error message in chat with current message ID
+      const errorMessage = `❌ **Error**: ${error instanceof Error ? error.message : String(error)}`;
+      updateAssistantMessage(errorMessage, true, currentAssistantMessageIdRef.current);
     } finally {
       setLoading(false);
     }
@@ -507,8 +579,7 @@ const EnhancedChatInterface: React.FC = () => {
       <div
         ref={chatWindowRef}
         id="chat-window"
-        className="flex-1 overflow-y-auto p-4 space-y-4 chat-container"
-        style={{ scrollBehavior: 'smooth' }}
+        className="flex-1 overflow-y-auto p-4 space-y-4 chat-container scroll-smooth"
         data-chat-container
       >
         {messages.length === 0 ? (
@@ -553,12 +624,12 @@ const EnhancedChatInterface: React.FC = () => {
           })
         )}
         
-        {/* Enhanced Thinking Indicator */}
-        {(isLoading || streaming.streamingState.isStreaming) && (
+        {/* Enhanced Thinking Indicator - Only show when loading, not streaming */}
+        {isLoading && !streaming.streamingState.isStreaming && (
           <ThinkingIndicator
-            isVisible={isLoading || streaming.streamingState.isStreaming}
-            isStreaming={streaming.streamingState.isStreaming}
-            streamingText={streaming.streamingState.streamedContent}
+            isVisible={true}
+            isStreaming={false}
+            streamingText=""
           />
         )}
       </div>

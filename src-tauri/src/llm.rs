@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 use log::{info, error, warn};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryStreamExt};
+use bytes::Bytes;
 
 // Configuration constants
 const OLLAMA_BASE_URL: &str = "http://localhost:11434";
-const DEFAULT_MODEL: &str = "gemma2:2b"; // Updated to use Gemma 2B for better performance
+const DEFAULT_MODEL: &str = "gemma3n:latest"; // EXCLUSIVE: Only gemma3n:latest model
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120); // 2 minutes timeout
 const STREAM_TIMEOUT: Duration = Duration::from_secs(180); // 3 minutes for streaming
 
@@ -387,41 +388,56 @@ pub async fn check_llm_health() -> Result<bool, String> {
 
 // Streaming LLM response command
 #[tauri::command]
-pub async fn start_llm_stream(app_handle: AppHandle, prompt: String) -> Result<String, String> {
-    info!("🚀 Starting LLM stream for prompt (length: {}): {}", prompt.len(), prompt);
+pub async fn start_llm_stream(
+    app_handle: AppHandle,
+    streamId: String,
+    prompt: String,
+    model: Option<String>,
+    systemPrompt: Option<String>
+) -> Result<String, String> {
+    info!("🚀 Starting LLM stream for streamId: {}, prompt length: {}", streamId, prompt.len());
+    info!("📊 Parameters - Model: {:?}, System prompt: {}", model, systemPrompt.is_some());
 
     if prompt.trim().is_empty() {
         error!("❌ Empty prompt provided");
         return Err("Prompt cannot be empty".to_string());
     }
 
-    // Generate a unique stream ID
-    let stream_id = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => format!("stream_{}", duration.as_millis()),
-        Err(e) => {
-            error!("❌ Failed to generate stream ID: {}", e);
-            return Err("Failed to generate stream ID".to_string());
-        }
+    if streamId.trim().is_empty() {
+        error!("❌ Empty streamId provided");
+        return Err("Stream ID cannot be empty".to_string());
+    }
+
+    // Combine system prompt with user prompt if provided
+    let final_prompt = if let Some(sys_prompt) = systemPrompt {
+        format!("{}\n\nUser: {}", sys_prompt, prompt)
+    } else {
+        prompt
     };
 
-    info!("📡 Created stream ID: {}", stream_id);
+    info!("📡 Using stream ID: {}", streamId);
+    info!("📝 Final prompt length: {}", final_prompt.len());
 
-    // Clone stream_id for the spawn task
-    let stream_id_clone = stream_id.clone();
+    // Clone streamId for the spawn task
+    let streamId_clone = streamId.clone();
 
     // Start the streaming process in the background
     info!("🚀 Spawning background streaming task...");
     tokio::spawn(async move {
-        info!("🔄 Background task started for stream: {}", stream_id_clone);
-        if let Err(e) = stream_llm_response(app_handle, stream_id_clone.clone(), prompt).await {
-            error!("❌ Stream error for {}: {}", stream_id_clone, e);
-        } else {
-            info!("✅ Background task completed for stream: {}", stream_id_clone);
+        info!("🔄 Background task started for stream: {}", streamId_clone);
+        match stream_llm_response(app_handle, streamId_clone.clone(), final_prompt).await {
+            Ok(_) => {
+                info!("✅ Background task completed successfully for stream: {}", streamId_clone);
+            }
+            Err(e) => {
+                error!("❌ Stream error for {}: {}", streamId_clone, e);
+                // The error has already been emitted in the stream_llm_response function
+            }
         }
     });
 
-    info!("✅ Stream command returning ID: {}", stream_id);
-    Ok(stream_id)
+    info!("✅ Stream command returning ID: {}", streamId);
+    Ok(streamId)
 }
 
 // Stop streaming command
@@ -478,25 +494,34 @@ pub async fn test_streaming(app_handle: AppHandle) -> Result<String, String> {
 // Internal streaming function
 async fn stream_llm_response(app_handle: AppHandle, stream_id: String, prompt: String) -> Result<(), String> {
     info!("🔄 Starting stream processing for: {} (prompt length: {})", stream_id, prompt.len());
+    info!("📝 Prompt preview: {}", if prompt.len() > 100 { &prompt[..100] } else { &prompt });
 
     // Try Ollama streaming first
+    info!("🚀 Attempting Ollama streaming for: {}", stream_id);
     match stream_ollama_response(&app_handle, &stream_id, &prompt).await {
         Ok(_) => {
-            info!("✅ Ollama streaming completed for: {}", stream_id);
+            info!("✅ Ollama streaming completed successfully for: {}", stream_id);
             Ok(())
         }
         Err(e) => {
-            warn!("⚠️ Ollama streaming failed for {}: {}, trying fallback", stream_id, e);
-            // Fallback to non-streaming response
+            warn!("⚠️ Ollama streaming failed for {}: {}", stream_id, e);
+            error!("🔍 Ollama error details: {}", e);
+
+            // Try fallback streaming
+            info!("🔄 Attempting fallback streaming for: {}", stream_id);
             match stream_fallback_response(&app_handle, &stream_id, &prompt).await {
                 Ok(_) => {
                     info!("✅ Fallback streaming completed for: {}", stream_id);
                     Ok(())
                 }
                 Err(fallback_error) => {
-                    error!("❌ Both Ollama and fallback streaming failed for {}: {}", stream_id, fallback_error);
-                    emit_stream_error(&app_handle, &stream_id, &format!("All streaming methods failed: {}", fallback_error)).await;
-                    Err(fallback_error)
+                    error!("❌ Both Ollama and fallback streaming failed for {}", stream_id);
+                    error!("🔍 Ollama error: {}", e);
+                    error!("🔍 Fallback error: {}", fallback_error);
+
+                    let combined_error = format!("Ollama failed: {}. Fallback failed: {}", e, fallback_error);
+                    emit_stream_error(&app_handle, &stream_id, &combined_error).await;
+                    Err(combined_error)
                 }
             }
         }
@@ -532,13 +557,14 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
     if !response.status().is_success() {
         let error_msg = format!("HTTP error from Ollama: {}", response.status());
         error!("❌ {}", error_msg);
+        emit_stream_error(app_handle, stream_id, &error_msg).await;
         return Err(error_msg);
     }
 
     // Handle streaming response properly
     info!("📖 Processing streaming response from Ollama...");
 
-    // Try to handle as streaming response first
+    // Use proper streaming with bytes_stream
     let mut stream = response.bytes_stream();
     let mut accumulated_response = String::new();
     let mut buffer = String::new();
@@ -551,7 +577,7 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
 
                 // Process complete JSON lines
                 while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].trim();
+                    let line = buffer[..newline_pos].trim().to_string();
                     buffer = buffer[newline_pos + 1..].to_string();
 
                     if line.is_empty() {
@@ -559,7 +585,7 @@ async fn stream_ollama_response(app_handle: &AppHandle, stream_id: &str, prompt:
                     }
 
                     // Try to parse each line as JSON
-                    match serde_json::from_str::<OllamaResponse>(line) {
+                    match serde_json::from_str::<OllamaResponse>(&line) {
                         Ok(ollama_response) => {
                             if !ollama_response.response.is_empty() {
                                 accumulated_response.push_str(&ollama_response.response);

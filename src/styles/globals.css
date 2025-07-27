@@ -1120,3 +1120,19 @@ body {
 .skip-link:focus {
   top: 6px;
 }
+
+/* Custom animations for typing indicator */
+.animate-bounce-delay-0 {
+  animation: bounce 1s infinite;
+  animation-delay: 0ms;
+}
+
+.animate-bounce-delay-150 {
+  animation: bounce 1s infinite;
+  animation-delay: 150ms;
+}
+
+.animate-bounce-delay-300 {
+  animation: bounce 1s infinite;
+  animation-delay: 300ms;
+}

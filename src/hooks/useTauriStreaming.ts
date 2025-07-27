@@ -59,10 +59,10 @@ export const useTauriStreaming = (): UseTauriStreamingReturn => {
         // Start new stream with all required parameters
         const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         await invoke('start_llm_stream', {
-          stream_id: streamId,
+          streamId: streamId,  // FIXED: Use camelCase to match Rust parameter
           prompt: prompt,
           model: null,
-          system_prompt: null
+          systemPrompt: null  // FIXED: Use camelCase to match Rust parameter
         });
         console.log('✅ [TAURI STREAMING] Stream started with ID:', streamId);
         
@@ -76,13 +76,18 @@ export const useTauriStreaming = (): UseTauriStreamingReturn => {
           currentStreamId: streamId,
         });
 
-        // Listen for stream events
-        const eventName = `llm_stream_${streamId}`;
-        console.log('👂 [TAURI STREAMING] Listening for events:', eventName);
+        // FIXED: Listen for the correct event name that backend emits
+        console.log('👂 [TAURI STREAMING] Listening for events: llm-stream-event');
         
-        const unlisten = await listen<StreamEvent>(eventName, (event) => {
+        const unlisten = await listen<StreamEvent>('llm-stream-event', (event) => {
           const streamEvent = event.payload;
           console.log('📤 [TAURI STREAMING] Received event:', streamEvent);
+
+          // FIXED: Check if this event is for our stream
+          if (streamEvent.stream_id !== streamId) {
+            console.log(`🚫 [TAURI STREAMING] Ignoring event for different stream: ${streamEvent.stream_id} (expected: ${streamId})`);
+            return;
+          }
 
           if (streamEvent.event_type === 'chunk') {
             fullContentRef.current += streamEvent.data;
@@ -142,7 +147,7 @@ export const useTauriStreaming = (): UseTauriStreamingReturn => {
     
     if (currentStreamIdRef.current) {
       try {
-        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });
+        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });  // FIXED: Use snake_case for stop command
         console.log('✅ [TAURI STREAMING] Stream stopped');
       } catch (error) {
         console.error('❌ [TAURI STREAMING] Failed to stop stream:', error);

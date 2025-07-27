@@ -33,6 +33,7 @@ interface PluginCardProps {
   onToggle: (pluginId: string, enabled: boolean) => void;
   onConfigure: (pluginId: string) => void;
   onRemove: (pluginId: string) => void;
+  onOpenDashboard: (pluginId: string) => void;
 }
 
 const PluginCard: React.FC<PluginCardProps> = ({
@@ -41,7 +42,8 @@ const PluginCard: React.FC<PluginCardProps> = ({
   state,
   onToggle,
   onConfigure,
-  onRemove
+  onRemove,
+  onOpenDashboard
 }) => {
   const [showDetails, setShowDetails] = useState(false);
 
@@ -170,6 +172,15 @@ const PluginCard: React.FC<PluginCardProps> = ({
           <div className="flex items-center justify-end space-x-2 mt-4">
             <button
               type="button"
+              onClick={() => onOpenDashboard(pluginId)}
+              className="flex items-center space-x-1 px-3 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+              disabled={!state.enabled}
+            >
+              <ExternalLink size={12} />
+              <span>Open Dashboard</span>
+            </button>
+            <button
+              type="button"
               onClick={() => onConfigure(pluginId)}
               className="flex items-center space-x-1 px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
             >
@@ -204,6 +215,8 @@ const EnhancedPluginPanel: React.FC<EnhancedPluginPanelProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [plugins, setPlugins] = useState<Record<string, { manifest: EnhancedPluginManifest; state: PluginState }>>({});
+  const [showToolDashboard, setShowToolDashboard] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<{ id: string; manifest: EnhancedPluginManifest } | null>(null);
 
   const { pluginsEnabled, setPluginsEnabled } = useAppStore();
 
@@ -321,6 +334,15 @@ const EnhancedPluginPanel: React.FC<EnhancedPluginPanelProps> = ({
   const handleConfigurePlugin = (pluginId: string) => {
     console.log('Configure plugin:', pluginId);
     // Implementation for plugin configuration
+  };
+
+  const handleOpenDashboard = (pluginId: string) => {
+    const plugin = plugins[pluginId];
+    if (plugin && plugin.state.enabled) {
+      setSelectedTool({ id: pluginId, manifest: plugin.manifest });
+      setShowToolDashboard(true);
+      console.log('Opening dashboard for plugin:', pluginId);
+    }
   };
 
   const handleRemovePlugin = (pluginId: string) => {
@@ -491,6 +513,7 @@ const EnhancedPluginPanel: React.FC<EnhancedPluginPanelProps> = ({
                   onToggle={handleTogglePlugin}
                   onConfigure={handleConfigurePlugin}
                   onRemove={handleRemovePlugin}
+                  onOpenDashboard={handleOpenDashboard}
                 />
               ))}
             </div>
@@ -509,6 +532,47 @@ const EnhancedPluginPanel: React.FC<EnhancedPluginPanelProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Tool Dashboard Modal */}
+      {showToolDashboard && selectedTool && (
+        <ToolDashboard
+          toolName={selectedTool.manifest.name}
+          toolIcon={(() => {
+            const iconMap: Record<string, React.ComponentType<any>> = {
+              todoList: CheckSquare,
+              noteTaker: FileText,
+              fileReader: FolderOpen,
+              fileWriter: FileText,
+              pluginInspector: Eye,
+              devDiagnostics: Zap,
+              webBrowser: Globe
+            };
+            return iconMap[selectedTool.id] || Package;
+          })()}
+          toolColor={selectedTool.manifest.ui?.color || 'text-blue-600'}
+          description={selectedTool.manifest.description}
+          onClose={() => {
+            setShowToolDashboard(false);
+            setSelectedTool(null);
+          }}
+          onExecute={async (data) => {
+            // Store tool context for LLM integration
+            const toolContext = {
+              toolName: selectedTool.manifest.name,
+              toolId: selectedTool.id,
+              data: data.toolData,
+              context: data.context,
+              timestamp: new Date().toISOString()
+            };
+
+            // Save to localStorage for LLM integration
+            localStorage.setItem('toolContext', JSON.stringify(toolContext));
+
+            console.log('Tool executed with context:', toolContext);
+            return { success: true, message: 'Tool context saved for LLM integration' };
+          }}
+        />
+      )}
     </div>
   );
 };

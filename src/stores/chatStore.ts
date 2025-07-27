@@ -48,15 +48,15 @@ const defaultPreferences: UserPreferences = {
   autoSave: true,
 };
 
-// Default LLM routing preferences
+// Default LLM routing preferences - EXCLUSIVE gemma3n:latest only
 const defaultLLMPreferences: LLMRoutingPreferences = {
   preferredProvider: 'local',
-  fallbackProvider: 'online',
-  autoSwitchOnOffline: true,
-  useOnlineForComplexQueries: false,
-  geminiApiKey: 'AIzaSyC757g1ptvolgutJo4JvHofjpAvhQXFoLM',
-  selectedOnlineModel: 'gemini-2.5-flash',
-  selectedOfflineModel: 'gemma3n:latest'
+  fallbackProvider: 'local', // Force local only
+  autoSwitchOnOffline: false, // Disable switching
+  useOnlineForComplexQueries: false, // Disable online
+  geminiApiKey: '', // Remove API key
+  selectedOnlineModel: 'gemma3n:latest', // EXCLUSIVE: Only gemma3n:latest
+  selectedOfflineModel: 'gemma3n:latest' // EXCLUSIVE: Only gemma3n:latest
 };
 
 // Chat store
@@ -78,50 +78,9 @@ export const useChatStore = create<ChatStore>()(
           timestamp: new Date(),
         };
 
-        set((state) => {
-          const updatedMessages = [...state.messages, newMessage];
-
-          // Update the active chat session if it exists
-          const activeChatId = state.activeChatId;
-          let updatedChatSessions = state.chatSessions;
-          let updatedChatSummaries = state.chatSummaries;
-
-          if (activeChatId && state.chatSessions[activeChatId]) {
-            const updatedSession = {
-              ...state.chatSessions[activeChatId],
-              messages: updatedMessages,
-              updatedAt: new Date(),
-              metadata: {
-                ...state.chatSessions[activeChatId].metadata,
-                messageCount: updatedMessages.length,
-                lastActivity: new Date()
-              }
-            };
-
-            updatedChatSessions = {
-              ...state.chatSessions,
-              [activeChatId]: updatedSession
-            };
-
-            // Update chat summary
-            updatedChatSummaries = state.chatSummaries.map(summary =>
-              summary.id === activeChatId
-                ? {
-                    ...summary,
-                    lastMessage: content.substring(0, 100),
-                    messageCount: updatedMessages.length,
-                    updatedAt: new Date()
-                  }
-                : summary
-            );
-          }
-
-          return {
-            messages: updatedMessages,
-            chatSessions: updatedChatSessions,
-            chatSummaries: updatedChatSummaries
-          };
-        });
+        set((state) => ({
+          messages: [...state.messages, newMessage]
+        }));
       },
 
       updateMessage: (id: string, updates: Partial<Message>) => {

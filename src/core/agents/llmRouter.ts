@@ -50,160 +50,47 @@ export class LLMRouter {
 
 
   /**
-   * Route an LLM request based on preferences and network status
+   * Route a request to the appropriate LLM provider
    */
-  async routeRequest(
-    prompt: string, 
-    systemPrompt?: string,
-    forceProvider?: LLMProvider
-  ): Promise<LLMResponse> {
-    const startTime = Date.now();
-
+  async routeRequest(prompt: string, systemPrompt?: string, forceProvider?: LLMProvider): Promise<LLMResponse> {
+    // EXCLUSIVE: Force local provider only
+    const provider: LLMProvider = 'local';
+    const model = this.getModelForProvider(provider);
+    
+    console.log(`🚀 [LLM ROUTER] Routing to ${provider} provider with model: ${model}`);
+    
     try {
-      // Update network status
-      await this.checkNetworkStatus();
-
-      // Determine which provider to use
-      const provider = this.determineProvider(prompt, forceProvider);
-      const model = this.getModelForProvider(provider);
-
-      console.log(`Routing LLM request to ${provider} (${model})`);
-
-      // Execute the request
-      const response = await this.executeRequest(provider, model, prompt, systemPrompt);
-      
+      // EXCLUSIVE: Only local execution
+      return await this.executeLocalRequest(prompt, systemPrompt, model);
+    } catch (error) {
+      console.error(`❌ [LLM ROUTER] ${provider} request failed:`, error);
       return {
-        ...response,
-        provider,
+        success: false,
+        response: '',
         model,
-        executionTime: Date.now() - startTime
+        error: error instanceof Error ? error.message : String(error)
       };
+    }
+  }
 
-    } catch (error) {
-      console.error('LLM routing error:', error);
+  /**
+   * Execute a local LLM request via Tauri
+   */
+  private async executeLocalRequest(prompt: string, systemPrompt?: string, model: string = 'gemma3n:latest'): Promise<LLMResponse> {
+    try {
+      console.log(`🖥️ [LLM ROUTER] Executing local request with model: ${model}`);
       
-      // Try fallback if primary failed
-      if (!forceProvider) {
-        const fallbackProvider = this.config.preferences.fallbackProvider;
-        if (fallbackProvider !== this.config.preferences.preferredProvider) {
-          console.log(`Attempting fallback to ${fallbackProvider}`);
-          return await this.routeRequest(prompt, systemPrompt, fallbackProvider);
-        }
-      }
-
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        provider: forceProvider || this.config.preferences.preferredProvider,
-        model: this.getModelForProvider(forceProvider || this.config.preferences.preferredProvider),
-        executionTime: Date.now() - startTime
-      };
-    }
-  }
-
-  /**
-   * Execute request with specific provider
-   */
-  private async executeRequest(
-    provider: LLMProvider,
-    model: LLMModel,
-    prompt: string,
-    systemPrompt?: string
-  ): Promise<Omit<LLMResponse, 'provider' | 'model' | 'executionTime'>> {
-    if (provider === 'local') {
-      return await this.executeLocalRequest(prompt, systemPrompt);
-    } else {
-      return await this.executeOnlineRequest(prompt, systemPrompt);
-    }
-  }
-
-  /**
-   * Execute local Gemma 3n request via Ollama
-   */
-  private async executeLocalRequest(
-    prompt: string,
-    systemPrompt?: string
-  ): Promise<Omit<LLMResponse, 'provider' | 'model' | 'executionTime'>> {
-    try {
-      // Combine system prompt with user prompt if provided
-      const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-
-      // Use the correct Tauri command that matches the backend implementation
-      const response = await invoke<string>('generate_llm_response', {
-        prompt: fullPrompt
-      });
-
-      if (!response || response.trim().length === 0) {
-        throw new Error('Received empty response from local LLM service');
-      }
-
+      // Use Tauri invoke for local requests
+      const response = await invoke('generate_llm_response', { prompt });
+      
       return {
         success: true,
-        response: response
+        response,
+        model,
+        provider: 'local'
       };
     } catch (error) {
-      console.error('Local LLM request failed:', error);
-
-      // Provide more specific error messages
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      if (errorMessage.includes('Connection refused') || errorMessage.includes('connect')) {
-        throw new Error('Cannot connect to Ollama service. Please ensure Ollama is running on localhost:11434 and the Gemma 3n model is available.');
-      } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
-        throw new Error('Request timed out. The local AI model may be loading or under heavy load.');
-      } else if (errorMessage.includes('model') && errorMessage.includes('not found')) {
-        throw new Error('Gemma 3n model not found. Please install it with: ollama pull gemma3n');
-      } else {
-        throw new Error(`Local LLM error: ${errorMessage}`);
-      }
-    }
-  }
-
-  /**
-   * Execute local Ollama request (removed online Gemini API)
-   */
-  private async executeLocalRequest(
-    prompt: string,
-    systemPrompt?: string
-  ): Promise<Omit<LLMResponse, 'provider' | 'model' | 'executionTime'>> {
-    try {
-      // Use Tauri command to communicate with local Ollama
-      const { invoke } = await import('@tauri-apps/api/core');
-
-      const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-
-      const response = await invoke('generate_llm_response', {
-        prompt: fullPrompt,
-        model: 'gemma2:2b' // Use local Gemma model
-      });
-
-      return {
-        content: response as string,
-        success: true,
-        error: null,
-        metadata: {
-          tokensUsed: 0, // Not available from Ollama
-          finishReason: 'completed'
-        }
-      };
-    } catch (error) {
-      console.error('Local LLM request failed:', error);
-      return {
-        content: '',
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-        metadata: {
-          tokensUsed: 0,
-          finishReason: 'error'
-        }
-      };
-    }
-  }
-
-      // This method is now deprecated - all requests use local models
-      throw new Error('Online API requests are no longer supported. Using local models only.');
-    } catch (error) {
-      console.error('Local LLM request failed:', error);
+      console.error('❌ [LLM ROUTER] Local request failed:', error);
       throw error;
     }
   }
@@ -263,7 +150,7 @@ export class LLMRouter {
    * Get the model name for a provider (local only now)
    */
   private getModelForProvider(provider: LLMProvider): LLMModel {
-    return 'gemma2:2b'; // Always use local Gemma model
+    return 'gemma3n:latest'; // EXCLUSIVE: Only gemma3n:latest model
   }
 
   /**

@@ -46,10 +46,12 @@ interface EnhancedChatActions extends ChatActions, ChatSessionActions {
   
   // Enhanced message management
   addMessageWithMetadata: (
-    content: string, 
-    role: 'user' | 'assistant', 
+    content: string,
+    role: 'user' | 'assistant',
     metadata?: { model?: string; provider?: LLMProvider; tokens?: number }
   ) => void;
+
+  addMessageDirect: (message: Message) => void;
   
   // Plugin integration
   executePluginWithContext: (input: string, context?: any) => Promise<PluginResult | null>;
@@ -318,7 +320,160 @@ export const useEnhancedChatStore = create<EnhancedChatStore>()(
       },
 
       updateMessage: (id: string, updates: Partial<Message>) => {
-        // Implementation will be added
+        console.log(`🔄 [ENHANCED STORE] Updating message ${id} with:`, updates);
+        
+        set((state) => {
+          // FIXED: Update messages array with proper ordering and validation
+          const updatedMessages = state.messages.map(msg => {
+            if (msg.id === id) {
+              // FIXED: Ensure we don't overwrite critical fields unless explicitly provided
+              const updatedMessage = {
+                ...msg,
+                ...updates,
+                timestamp: updates.timestamp || msg.timestamp,
+                // FIXED: Preserve existing metadata unless explicitly updated
+                metadata: updates.metadata ? { ...msg.metadata, ...updates.metadata } : msg.metadata
+              };
+              
+              console.log(`✅ [ENHANCED STORE] Updated message ${id}:`, {
+                oldContent: msg.content?.substring(0, 50) + '...',
+                newContent: updatedMessage.content?.substring(0, 50) + '...',
+                role: updatedMessage.role
+              });
+              
+              return updatedMessage;
+            }
+            return msg;
+          });
+
+          // FIXED: Also update in the active chat session with proper ordering and validation
+          const { activeChatId, chatSessions } = state;
+          let updatedChatSessions = state.chatSessions;
+          
+          if (activeChatId && chatSessions[activeChatId]) {
+            const currentSession = chatSessions[activeChatId];
+            const updatedSessionMessages = currentSession.messages.map(msg => {
+              if (msg.id === id) {
+                // FIXED: Ensure consistent updates between messages array and session
+                const updatedMessage = {
+                  ...msg,
+                  ...updates,
+                  timestamp: updates.timestamp || msg.timestamp,
+                  metadata: updates.metadata ? { ...msg.metadata, ...updates.metadata } : msg.metadata
+                };
+                
+                console.log(`✅ [ENHANCED STORE] Updated session message ${id}:`, {
+                  oldContent: msg.content?.substring(0, 50) + '...',
+                  newContent: updatedMessage.content?.substring(0, 50) + '...',
+                  role: updatedMessage.role
+                });
+                
+                return updatedMessage;
+              }
+              return msg;
+            });
+
+            const updatedSession = {
+              ...currentSession,
+              messages: updatedSessionMessages,
+              updatedAt: new Date(),
+              metadata: {
+                ...currentSession.metadata,
+                lastActivity: new Date()
+              }
+            };
+
+            updatedChatSessions = {
+              ...state.chatSessions,
+              [activeChatId]: updatedSession
+            };
+          }
+
+          console.log(`✅ [ENHANCED STORE] Successfully updated message ${id} in both arrays`);
+
+          return {
+            messages: updatedMessages,
+            chatSessions: updatedChatSessions
+          };
+        });
+
+        // FIXED: Save to persistent storage with proper error handling
+        try {
+          const { activeChatId, chatSessions } = get();
+          if (activeChatId && chatSessions[activeChatId]) {
+            get().saveChatSession(activeChatId, chatSessions[activeChatId]);
+          }
+        } catch (error) {
+          console.error('❌ [ENHANCED STORE] Failed to save updated message:', error);
+        }
+      },
+
+      // Add message directly with full control
+      addMessageDirect: (message: Message) => {
+        const state = get();
+        const activeChatId = state.activeChatId;
+
+        console.log(`📝 [ENHANCED STORE] Adding message directly:`, {
+          id: message.id,
+          role: message.role,
+          contentLength: message.content.length,
+          activeChatId
+        });
+
+        // FIXED: Check if message already exists to prevent duplicates
+        const messageExists = state.messages.some(msg => msg.id === message.id);
+        if (messageExists) {
+          console.log(`⚠️ [ENHANCED STORE] Message ${message.id} already exists, skipping`);
+          return;
+        }
+
+        set((state) => {
+          // FIXED: Add to current messages with proper ordering
+          const updatedMessages = [...state.messages, message];
+
+          // FIXED: Also add to active chat session if exists with proper isolation
+          let updatedChatSessions = state.chatSessions;
+          
+          if (activeChatId && state.chatSessions[activeChatId]) {
+            const currentSession = state.chatSessions[activeChatId];
+            
+            // FIXED: Check if message already exists in session to prevent duplicates
+            const sessionMessageExists = currentSession.messages.some(msg => msg.id === message.id);
+            if (!sessionMessageExists) {
+              const updatedSession = {
+                ...currentSession,
+                messages: [...currentSession.messages, message],
+                updatedAt: new Date(),
+                metadata: {
+                  ...currentSession.metadata,
+                  messageCount: currentSession.messages.length + 1,
+                  lastActivity: new Date()
+                }
+              };
+
+              updatedChatSessions = {
+                ...state.chatSessions,
+                [activeChatId]: updatedSession
+              };
+
+              console.log(`✅ [ENHANCED STORE] Added message ${message.id} to session ${activeChatId}`);
+            } else {
+              console.log(`⚠️ [ENHANCED STORE] Message ${message.id} already exists in session, skipping`);
+            }
+          }
+
+          console.log(`✅ [ENHANCED STORE] Added message ${message.id} to messages array`);
+
+          return {
+            messages: updatedMessages,
+            chatSessions: updatedChatSessions
+          };
+        });
+
+        // Save to persistent storage
+        if (activeChatId && state.chatSessions[activeChatId]) {
+          get().saveChatSession(activeChatId, state.chatSessions[activeChatId]);
+        }
       },
 
       deleteMessage: (id: string) => {
@@ -347,27 +502,180 @@ export const useEnhancedChatStore = create<EnhancedChatStore>()(
       },
 
       switchToChat: async (chatId: string): Promise<void> => {
-        // Implementation will be added
+        const state = get();
+        const session = state.chatSessions[chatId];
+
+        if (!session) {
+          console.error('Chat session not found:', chatId);
+          return;
+        }
+
+        // Set as active chat
+        set({
+          activeChatId: chatId,
+          messages: session.messages || []
+        });
+
+        console.log('Switched to chat:', chatId, 'with', session.messages?.length || 0, 'messages');
       },
 
       renameChat: async (chatId: string, newTitle: string): Promise<void> => {
-        // Implementation will be added
+        const state = get();
+        const session = state.chatSessions[chatId];
+
+        if (!session) {
+          console.error('Chat session not found:', chatId);
+          return;
+        }
+
+        // Update session title
+        const updatedSession = {
+          ...session,
+          title: newTitle.trim(),
+          updatedAt: new Date()
+        };
+
+        // Update in sessions
+        set((state) => ({
+          chatSessions: {
+            ...state.chatSessions,
+            [chatId]: updatedSession
+          }
+        }));
+
+        // Update in summaries
+        set((state) => ({
+          chatSummaries: state.chatSummaries.map(summary =>
+            summary.id === chatId
+              ? { ...summary, title: newTitle.trim(), updatedAt: new Date() }
+              : summary
+          )
+        }));
+
+        // Save to persistent storage
+        get().saveChatSession(chatId, updatedSession);
+
+        console.log('Renamed chat:', chatId, 'to:', newTitle);
       },
 
       deleteChat: async (chatId: string): Promise<void> => {
-        // Implementation will be added
+        const state = get();
+
+        if (!state.chatSessions[chatId]) {
+          console.error('Chat session not found:', chatId);
+          return;
+        }
+
+        // Remove from sessions
+        const { [chatId]: deletedSession, ...remainingSessions } = state.chatSessions;
+
+        set({
+          chatSessions: remainingSessions,
+          chatSummaries: state.chatSummaries.filter(summary => summary.id !== chatId),
+          // If this was the active chat, clear it
+          activeChatId: state.activeChatId === chatId ? null : state.activeChatId,
+          messages: state.activeChatId === chatId ? [] : state.messages
+        });
+
+        // Remove from persistent storage
+        try {
+          const store = await initChatStore();
+          if (store) {
+            await store.delete(`chat-${chatId}`);
+          }
+        } catch (error) {
+          console.warn('Failed to delete from persistent storage:', error);
+        }
+
+        console.log('Deleted chat:', chatId);
       },
 
       archiveChat: async (chatId: string): Promise<void> => {
-        // Implementation will be added
+        const state = get();
+        const session = state.chatSessions[chatId];
+
+        if (!session) {
+          console.error('Chat session not found:', chatId);
+          return;
+        }
+
+        // Mark session as archived
+        const archivedSession = {
+          ...session,
+          metadata: {
+            ...session.metadata,
+            archived: true,
+            archivedAt: new Date()
+          },
+          updatedAt: new Date()
+        };
+
+        // Update in sessions
+        set((state) => ({
+          chatSessions: {
+            ...state.chatSessions,
+            [chatId]: archivedSession
+          }
+        }));
+
+        // Update in summaries (mark as archived)
+        set((state) => ({
+          chatSummaries: state.chatSummaries.map(summary =>
+            summary.id === chatId
+              ? {
+                  ...summary,
+                  metadata: { ...summary.metadata, archived: true },
+                  updatedAt: new Date()
+                }
+              : summary
+          )
+        }));
+
+        // Save to persistent storage
+        get().saveChatSession(chatId, archivedSession);
+
+        console.log('Archived chat:', chatId);
       },
 
       loadChatSessions: async (): Promise<void> => {
         // Implementation will be added
       },
 
-      saveChatSession: async (chatId: string): Promise<void> => {
-        await get().syncWithTauriStore();
+      saveChatSession: async (chatId: string, session?: ChatSession): Promise<void> => {
+        try {
+          const state = get();
+          const sessionToSave = session || state.chatSessions[chatId];
+          
+          if (!sessionToSave) {
+            console.warn(`No session found to save for chatId: ${chatId}`);
+            return;
+          }
+
+          // Update the session in state if provided
+          if (session) {
+            set((state) => ({
+              chatSessions: {
+                ...state.chatSessions,
+                [chatId]: session
+              }
+            }));
+          }
+
+          // Sync with Tauri store
+          await get().syncWithTauriStore();
+          
+          // Try to save to backend if available
+          try {
+            await invoke('save_chat_session', {
+              chatId,
+              session: sessionToSave
+            });
+          } catch (error) {
+            console.warn('Backend unavailable for saving session:', error);
+          }
+        } catch (error) {
+          console.error('Failed to save chat session:', error);
+        }
       },
 
       duplicateChat: async (chatId: string): Promise<string> => {

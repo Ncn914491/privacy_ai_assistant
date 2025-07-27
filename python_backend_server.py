@@ -88,7 +88,7 @@ DEBUG_AUDIO_DIR.mkdir(exist_ok=True)
 
 # Ollama Configuration
 OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL = "gemma3n:latest"  # Standardized model name
+DEFAULT_MODEL = "gemma3n:latest"  # EXCLUSIVE: Only gemma3n:latest model
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

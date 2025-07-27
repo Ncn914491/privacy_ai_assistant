@@ -46,8 +46,9 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
   const [newDataTitle, setNewDataTitle] = useState('');
   const [newDataContent, setNewDataContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'loading'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
+  const [isExecuting, setIsExecuting] = useState(false);
 
   // Load existing data for this tool
   useEffect(() => {
@@ -114,30 +115,62 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
   const handleExecuteTool = async () => {
     if (!onExecute) return;
 
-    setIsLoading(true);
+    setIsExecuting(true);
+    setStatus('loading');
+    setStatusMessage('Executing tool...');
+
     try {
       const result = await onExecute({
         toolData,
         toolName,
         context: formatToolDataForLLM(toolData)
       });
+
       setStatus('success');
-      setStatusMessage('Tool executed successfully');
+      setStatusMessage(result?.message || 'Tool executed successfully');
+
+      // Add visual feedback with animation
+      setTimeout(() => {
+        setStatus('idle');
+        setStatusMessage('');
+      }, 3000);
     } catch (error) {
       setStatus('error');
       setStatusMessage(error instanceof Error ? error.message : 'Execution failed');
+
+      // Keep error message longer
+      setTimeout(() => {
+        setStatus('idle');
+        setStatusMessage('');
+      }, 5000);
     } finally {
-      setIsLoading(false);
-      setTimeout(() => setStatus('idle'), 3000);
+      setIsExecuting(false);
     }
   };
 
   const formatToolDataForLLM = (data: ToolData[]): string => {
     if (data.length === 0) return 'No data available for this tool.';
 
-    return data.map((item, index) =>
-      `${index + 1}. ${item.title}\n   ${item.content}\n   Created: ${item.createdAt.toLocaleDateString()}`
-    ).join('\n\n');
+    let formatted = `=== ${toolName.toUpperCase()} DATA ===\n`;
+    formatted += `Total items: ${data.length}\n`;
+    formatted += `Last updated: ${new Date().toLocaleString()}\n\n`;
+
+    data.forEach((item, index) => {
+      formatted += `${index + 1}. ${item.title}\n`;
+      formatted += `   Content: ${item.content}\n`;
+      formatted += `   Created: ${item.createdAt.toLocaleDateString()}\n`;
+      formatted += `   Last Modified: ${item.updatedAt.toLocaleDateString()}\n`;
+
+      if (item.metadata && Object.keys(item.metadata).length > 0) {
+        formatted += `   Metadata: ${JSON.stringify(item.metadata)}\n`;
+      }
+
+      formatted += '\n';
+    });
+
+    formatted += `=== END ${toolName.toUpperCase()} DATA ===`;
+
+    return formatted;
   };
 
   const handleSendToChat = () => {
@@ -189,15 +222,25 @@ const ToolDashboard: React.FC<ToolDashboardProps> = ({
           </button>
         </div>
 
-        {/* Status Bar */}
+        {/* Enhanced Status Bar */}
         {status !== 'idle' && (
           <div className={cn(
-            "px-6 py-3 flex items-center space-x-2",
+            "px-6 py-3 flex items-center space-x-2 transition-all duration-300",
             status === 'success' && "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300",
-            status === 'error' && "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300"
+            status === 'error' && "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300",
+            status === 'loading' && "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300"
           )}>
-            {status === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-            <span className="text-sm">{statusMessage}</span>
+            {status === 'success' && <CheckCircle size={16} />}
+            {status === 'error' && <AlertCircle size={16} />}
+            {status === 'loading' && (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+            )}
+            <span className="text-sm font-medium">{statusMessage}</span>
+            {status === 'success' && (
+              <div className="ml-auto">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              </div>
+            )}
           </div>
         )}
 

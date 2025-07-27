@@ -38,8 +38,7 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
   const websocketRef = useRef<WebSocket | null>(null);
 
   // Determine if we should use online or offline streaming
-  const isOnlineModel = llmPreferences.preferredProvider === 'online' || 
-                       (llmPreferences.preferredProvider === 'auto' && navigator.onLine);
+  const isOnlineModel = llmPreferences.preferredProvider === 'online';
 
   const startStream = useCallback(async (
     prompt: string,
@@ -61,16 +60,11 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
           currentStreamId: null,
         });
 
-        if (isOnlineModel) {
-          // Use online streaming (Gemini API with custom streaming)
-          await startOnlineStream(prompt, onChunk, onComplete, resolve, reject);
+        // FIXED: Always use offline streaming for now (gemma3n:latest)
+        if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
+          await startTauriStream(prompt, onChunk, onComplete, resolve, reject);
         } else {
-          // Use offline streaming (Tauri/WebSocket)
-          if (TAURI_ENV.isTauri && TAURI_ENV.hasInvoke) {
-            await startTauriStream(prompt, onChunk, onComplete, resolve, reject);
-          } else {
-            await startWebSocketStream(prompt, onChunk, onComplete, resolve, reject);
-          }
+          await startWebSocketStream(prompt, onChunk, onComplete, resolve, reject);
         }
       } catch (error) {
         console.error('❌ [ADAPTIVE STREAMING] Failed to start stream:', error);
@@ -159,10 +153,10 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
       
       const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       await invoke('start_llm_stream', {
-        stream_id: streamId,
+        streamId: streamId,  // FIXED: Use camelCase to match Rust parameter
         prompt: prompt,
         model: llmPreferences.selectedOfflineModel || null,
-        system_prompt: null
+        systemPrompt: null  // FIXED: Use camelCase to match Rust parameter
       });
       currentStreamIdRef.current = streamId;
       
@@ -171,10 +165,16 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
         currentStreamId: streamId,
       }));
 
-      // Listen for stream events
-      const eventName = `llm_stream_${streamId}`;
-      const unlisten = await listen<StreamEvent>(eventName, (event) => {
+      // FIXED: Listen for the correct event name that backend emits
+      console.log('👂 [ADAPTIVE STREAMING] Listening for events: llm-stream-event');
+      const unlisten = await listen<StreamEvent>('llm-stream-event', (event) => {
         const streamEvent = event.payload;
+        
+        // FIXED: Check if this event is for our stream
+        if (streamEvent.stream_id !== streamId) {
+          console.log(`🚫 [ADAPTIVE STREAMING] Ignoring event for different stream: ${streamEvent.stream_id} (expected: ${streamId})`);
+          return;
+        }
         
         if (streamEvent.event_type === 'chunk') {
           fullContentRef.current += streamEvent.data;
@@ -292,9 +292,10 @@ export const useAdaptiveStreaming = (): UseAdaptiveStreamingReturn => {
     // Stop Tauri stream
     if (currentStreamIdRef.current) {
       try {
-        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });
+        await invoke('stop_llm_stream', { stream_id: currentStreamIdRef.current });  // FIXED: Use snake_case for stop command
+        console.log('✅ [ADAPTIVE STREAMING] Stream stopped');
       } catch (error) {
-        console.error('❌ Failed to stop Tauri stream:', error);
+        console.error('❌ [ADAPTIVE STREAMING] Failed to stop stream:', error);
       }
     }
 

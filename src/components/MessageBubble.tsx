@@ -74,9 +74,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* Message Bubble */}
         <div
           className={cn(
-            'relative max-w-[70%] rounded-2xl px-4 py-2 shadow-sm',
+            'relative max-w-[70%] rounded-2xl px-4 py-2 shadow-sm transition-all duration-200',
             isUser && 'bg-primary-600 text-white',
-            isAssistant && 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+            isAssistant && 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100',
+            isStreaming && isAssistant && 'ring-2 ring-blue-200 dark:ring-blue-800 ring-opacity-50'
           )}
         >
           {/* Loading State */}
@@ -134,15 +135,39 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       )
                     }}
                   >
-                    {message.content || streamingText || ''}
+                    {/* FIXED: Ensure content is always displayed with proper fallbacks */}
+                    {(() => {
+                      const content = message.content || streamingText || '';
+                      const trimmedContent = content.trim();
+                      
+                      // FIXED: Handle different content states properly
+                      if (trimmedContent === 'Thinking...' || trimmedContent === '') {
+                        return 'Thinking...';
+                      }
+                      
+                      if (trimmedContent === 'No content available') {
+                        return 'No response generated. Please try again.';
+                      }
+                      
+                      return trimmedContent || 'Processing...';
+                    })()}
                   </ReactMarkdown>
-                  {isStreaming && (
-                    <span className="inline-block w-2 h-4 bg-blue-500 animate-pulse ml-1" aria-label="Typing indicator"></span>
+                  
+                  {/* FIXED: Show streaming indicator only when actually streaming */}
+                  {(isStreaming || (message.metadata?.isStreaming && !message.metadata?.isPlaceholder)) && (
+                    <span className="inline-flex items-center ml-2" aria-label="AI is typing">
+                      <span className="flex space-x-1">
+                        <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-delay-0"></span>
+                        <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-delay-150"></span>
+                        <span className="w-1 h-1 bg-blue-500 rounded-full animate-bounce-delay-300"></span>
+                      </span>
+                    </span>
                   )}
                 </div>
               ) : (
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {message.content}
+                  {/* FIXED: Ensure user message content is always displayed */}
+                  {message.content || 'No content available'}
                 </p>
               )}
             </div>
