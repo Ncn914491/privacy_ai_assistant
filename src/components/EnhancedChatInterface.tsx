@@ -757,30 +757,29 @@ const EnhancedChatInterface: React.FC = () => {
           })
         )}
         
-        {/* Enhanced Thinking Indicator - Show for both loading and streaming */}
-        {(isLoading || streaming.streamingState.isStreaming) && (
-          <div className="relative">
-            <ThinkingIndicator
-              isVisible={true}
-              isStreaming={streaming.streamingState.isStreaming}
-              streamingText={streaming.streamingState.streamedContent}
-            />
+        {/* FIXED: Only show ThinkingIndicator when loading, not when streaming */}
+        {/* Streaming responses are displayed in real-time within MessageBubble to prevent duplicates */}
+        {isLoading && !streaming.streamingState.isStreaming && (
+          <ThinkingIndicator
+            isVisible={true}
+            isStreaming={false}
+            streamingText=""
+          />
+        )}
 
-            {/* Stop Button for Streaming */}
-            {streaming.streamingState.isStreaming && (
-              <div className="absolute top-2 right-2">
-                <button
-                  type="button"
-                  onClick={handleStreamingControl}
-                  className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-lg"
-                  title="Stop AI response generation"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <rect x="6" y="6" width="8" height="8" rx="1" />
-                  </svg>
-                </button>
-              </div>
-            )}
+        {/* Stop Button for Streaming - Show as floating button when streaming */}
+        {streaming.streamingState.isStreaming && (
+          <div className="fixed bottom-20 right-6 z-50">
+            <button
+              type="button"
+              onClick={handleStreamingControl}
+              className="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg transition-all duration-200 hover:scale-105"
+              title="Stop AI response generation"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <rect x="6" y="6" width="8" height="8" rx="1" />
+              </svg>
+            </button>
           </div>
         )}
       </div>

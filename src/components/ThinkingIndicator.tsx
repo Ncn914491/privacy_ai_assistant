@@ -17,33 +17,9 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
 }) => {
   if (!isVisible) return null;
 
-  // If we have streaming text, show the streaming response
-  if (isStreaming && streamingText) {
-    return (
-      <div className={cn(
-        'mx-4 mb-4 p-4 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 rounded-lg border border-green-200 dark:border-green-700',
-        className
-      )}>
-        <div className="flex items-start space-x-3">
-          {/* Streaming Icon */}
-          <div className="relative mt-1">
-            <Brain className="w-4 h-4 text-green-600 dark:text-green-400" />
-            <div className="absolute -top-1 -right-1">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            </div>
-          </div>
-
-          {/* Streaming Text with Typewriter Effect */}
-          <div className="flex-1 min-w-0">
-            <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-              {streamingText}
-              <span className="inline-block w-2 h-4 bg-green-500 animate-pulse ml-1"></span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // FIXED: Don't show streaming text in ThinkingIndicator to prevent duplicate rendering
+  // The streaming text is already displayed in the MessageBubble component in real-time
+  // ThinkingIndicator should only show the "thinking" state, not duplicate the streaming content
 
   // Default thinking indicator
   return (
